@@ -8,6 +8,11 @@ services:
     # Só as variáveis da API (sem POSTGRES_*)
     env_file:
       - .env.api
+    environment:
+      # Senha lida do arquivo montado pelo Docker secret (não fica no env/docker inspect)
+      DB_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
     ports:
       # porta_da_maquina (HOST_PORT no .env) : porta interna fixa da API
       - "${HOST_PORT:-3000}:3000"
@@ -37,6 +42,11 @@ services:
     # Só as variáveis do Postgres (sem DB_* da API)
     env_file:
       - .env.postgres
+    environment:
+      # Convenção da imagem oficial: lê a senha do arquivo em vez de POSTGRES_PASSWORD
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
     volumes:
       # Postgres 18+: o volume é montado em /var/lib/postgresql (não mais em /data)
       - postgres-data:/var/lib/postgresql
@@ -58,6 +68,12 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+secrets:
+  # Arquivo local fora do git (.gitignore) e fora da imagem (.dockerignore).
+  # Montado em /run/secrets/db_password nos serviços que o declaram.
+  db_password:
+    file: ./secrets/db_password.txt
 
 networks:
   nest-net:

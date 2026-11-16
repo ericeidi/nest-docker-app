@@ -14,7 +14,7 @@ Aplicação NestJS 12 + PostgreSQL 18 rodando via Docker Compose (runtime: OrbSt
 cp .env.example .env                    # variáveis do compose
 cp .env.api.example .env.api            # variáveis da API
 cp .env.postgres.example .env.postgres  # variáveis do Postgres
-# troque "troque-me" pela mesma senha nos dois arquivos
+mkdir -p secrets && openssl rand -hex 16 | tr -d '\n' > secrets/db_password.txt && chmod 600 secrets/db_password.txt
 docker compose up -d --build  # build da imagem + sobe o container em background
 docker compose ps             # STATUS deve ficar "(healthy)"
 curl http://localhost:3000/health
@@ -38,8 +38,22 @@ Cada container recebe **somente** as próprias variáveis:
 | `.env.api` | `APP_NAME` | Exemplo de variável lida via `ConfigService` |
 | `.env.api` | `DB_HOST` | Host do banco **visto pela API** = nome do serviço (`postgres`). Nunca `localhost` |
 | `.env.api` | `DB_PORT` | Porta **interna** do Postgres (`5432`) |
-| `.env.api` | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Credenciais usadas pela API (TypeORM) |
-| `.env.postgres` | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Criação do banco — **só na primeira criação do volume** |
+| `.env.api` | `DB_USER` / `DB_NAME` | Credenciais usadas pela API (TypeORM) |
+| `.env.postgres` | `POSTGRES_USER` / `POSTGRES_DB` | Criação do banco — **só na primeira criação do volume** |
+| `secrets/db_password.txt` | — | Senha do banco (Docker secret). **Não** é variável de ambiente |
+
+### Senhas: Docker secrets
+
+```
+secrets/db_password.txt ──(compose secrets:)──► /run/secrets/db_password
+        │                                           ├─ api      → DB_PASSWORD_FILE       → lerSegredo()
+        └─ fora do git e da imagem                  └─ postgres → POSTGRES_PASSWORD_FILE → entrypoint oficial
+```
+
+- A senha **não** aparece em `docker inspect`, `docker compose config` nem em `printenv` dentro do container.
+- Dentro do container: arquivo `/run/secrets/db_password`, dono `node`, permissão `600`.
+- A API aceita `DB_PASSWORD` direto como fallback (usado pelos testes e2e).
+- Trocar a senha de um volume existente: `ALTER ROLE ... PASSWORD` no banco **e** atualizar o arquivo; depois `docker compose up -d`.
 
 - Nova variável: adicione no arquivo do serviço **e** no `.example` correspondente (sem valor real), depois `docker compose up -d` (recria o container com o novo env).
 - Nenhum `.env*` entra na imagem (`.dockerignore`) nem é commitado (`.gitignore`), exceto os `.example`.
