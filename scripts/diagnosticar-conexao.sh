@@ -56,13 +56,26 @@ done
 etapa 3 "Variáveis de conexão dentro da API"
 hostBanco=$(variavel_api DB_HOST); portaBanco=$(variavel_api DB_PORT)
 usuarioBanco=$(variavel_api DB_USER); nomeBanco=$(variavel_api DB_NAME)
-senhaBanco=$(variavel_api DB_PASSWORD)
-for nomeVariavel in DB_HOST DB_PORT DB_USER DB_NAME DB_PASSWORD; do
+for nomeVariavel in DB_HOST DB_PORT DB_USER DB_NAME; do
   [ -z "$(variavel_api "$nomeVariavel")" ] && falhar "$nomeVariavel vazia no container da API" \
     "variável ausente no .env.api ou container não foi recriado após alterar o .env.api" \
     "confira o .env.api e rode docker compose up -d (restart NÃO relê o env_file)"
 done
-ok "DB_HOST=$hostBanco DB_PORT=$portaBanco DB_USER=$usuarioBanco DB_NAME=$nomeBanco DB_PASSWORD=(oculta)"
+# Senha: Docker secret (DB_PASSWORD_FILE) com fallback para DB_PASSWORD — nunca exibida
+arquivoSenha=$(variavel_api DB_PASSWORD_FILE)
+if [ -n "$arquivoSenha" ]; then
+  senhaBanco=$(docker exec "$CONTAINER_API" cat "$arquivoSenha" 2>/dev/null)
+  [ -z "$senhaBanco" ] && falhar "secret $arquivoSenha ausente, vazio ou ilegível na API" \
+    "arquivo secrets/db_password.txt não existe/está vazio, ou o serviço api não declara 'secrets: [db_password]'" \
+    "crie secrets/db_password.txt (sem quebra de linha extra) e rode docker compose up -d"
+  origemSenha="secret $arquivoSenha"
+else
+  senhaBanco=$(variavel_api DB_PASSWORD)
+  [ -z "$senhaBanco" ] && falhar "nem DB_PASSWORD_FILE nem DB_PASSWORD definidos na API" \
+    "senha do banco não configurada" "configure o secret db_password no docker-compose.yml"
+  origemSenha="variável DB_PASSWORD"
+fi
+ok "DB_HOST=$hostBanco DB_PORT=$portaBanco DB_USER=$usuarioBanco DB_NAME=$nomeBanco senha=(oculta, via $origemSenha)"
 if [ "$hostBanco" = "localhost" ] || [ "$hostBanco" = "127.0.0.1" ]; then
   falhar "DB_HOST=$hostBanco" \
     "dentro do container, localhost é o PRÓPRIO container da API — o Postgres está em outro container" \
@@ -103,7 +116,7 @@ if ! saidaPsql=$(docker exec -e PGPASSWORD="$senhaBanco" "$CONTAINER_BANCO" \
   if [[ "$saidaPsql" == *"password authentication failed"* ]]; then
     falhar "senha recusada para o usuário '$usuarioBanco'" \
       "DB_PASSWORD diferente da senha criada no banco. POSTGRES_PASSWORD só vale na PRIMEIRA criação do volume" \
-      "alinhe DB_PASSWORD (.env.api) com a senha real, ou recrie o volume (APAGA OS DADOS): docker compose down -v && docker compose up -d"
+      "alinhe secrets/db_password.txt com a senha real, ou recrie o volume (APAGA OS DADOS): docker compose down -v && docker compose up -d"
   elif [[ "$saidaPsql" == *"does not exist"* ]]; then
     falhar "$saidaPsql" "DB_NAME ou DB_USER não existem no servidor" "alinhe DB_* (.env.api) com POSTGRES_* (.env.postgres) (ou crie o banco/usuário)"
   else

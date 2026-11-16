@@ -21,3 +21,7 @@ npm-debug.log*
 # IDEs
 .idea/
 .vscode/
+
+# Docker secrets (só os .example são versionados)
+secrets/*
+!secrets/*.example
