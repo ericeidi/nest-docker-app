@@ -145,6 +145,15 @@ runtime       (alpine puro) : libstdc++ + libgcc + binário node + node_modules 
 - Cache do npm entre builds via BuildKit (`--mount=type=cache`): mudanças só em `src/` reaproveitam as camadas de dependências.
 - O `HEALTHCHECK` está na imagem: `docker run` sem compose também reporta `healthy`/`unhealthy`.
 - O runtime usa o **mesmo Alpine** (3.24.4) da imagem do Node — exigência do binário (musl + `libstdc++`/`libgcc`, verificado com `ldd`). Ao atualizar o Node, confira a versão do Alpine dele.
+- `apk upgrade` no runtime aplica correções de segurança do Alpine publicadas após o digest da base.
+
+### Scan de vulnerabilidades
+
+```bash
+./scripts/scan-imagens.sh     # Trivy em container; exit 1 se houver CRITICAL/HIGH com correção
+```
+
+Último resultado: **API 0 vulnerabilidades** · Postgres 1 CRITICAL + 25 HIGH, todos no `gosu` da imagem oficial (sem versão corrigida upstream — issue #37). Detalhes em `docs/seguranca/scan-imagens.md`.
 
 ## Limites de recursos
 

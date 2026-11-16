@@ -27,8 +27,11 @@ RUN npm run build
 # ---------- Etapa 3: runtime ----------
 FROM ${IMAGEM_RUNTIME} AS runtime
 
+# apk upgrade: aplica correções de segurança publicadas no repo do Alpine após o digest da base
+# (ex.: CVE-2026-4738 no zlib, apontado pelo scan — ver docs/seguranca/scan-imagens.md)
 # Bibliotecas exigidas pelo binário node (verificado com ldd) + usuário não-root uid 1000
-RUN apk add --no-cache libstdc++ libgcc \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache libstdc++ libgcc \
     && addgroup -g 1000 node \
     && adduser -u 1000 -G node -s /sbin/nologin -D node
 
