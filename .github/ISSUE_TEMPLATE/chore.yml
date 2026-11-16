@@ -1,0 +1,25 @@
+name: Chore
+description: Manutenção, configuração, dependências, infraestrutura
+title: "chore: "
+labels: ["chore"]
+body:
+  - type: textarea
+    id: objetivo
+    attributes:
+      label: Objetivo
+      description: O que muda e por quê.
+    validations:
+      required: true
+  - type: textarea
+    id: tarefas
+    attributes:
+      label: Tarefas
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: riscos
+    attributes:
+      label: Riscos e rollback
+      description: O que pode quebrar e como reverter.

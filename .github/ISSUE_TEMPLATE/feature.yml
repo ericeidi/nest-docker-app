@@ -1,0 +1,41 @@
+name: Feature
+description: Nova funcionalidade ou melhoria
+title: "feat: "
+labels: ["feature"]
+body:
+  - type: textarea
+    id: contexto
+    attributes:
+      label: Contexto
+      description: Por que essa entrega é necessária? Qual problema resolve?
+    validations:
+      required: true
+  - type: textarea
+    id: escopo
+    attributes:
+      label: O que será entregue
+      description: Descrição objetiva do escopo. O que NÃO faz parte também ajuda.
+    validations:
+      required: true
+  - type: textarea
+    id: criterios
+    attributes:
+      label: Critérios de aceite
+      description: Como saber que está pronto? Um item verificável por linha.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: tarefas
+    attributes:
+      label: Tarefas técnicas
+      description: Arquivos/áreas afetadas e passos previstos.
+      value: |
+        - [ ]
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      multiple: true
+      options: [API (NestJS), Docker / Compose, PostgreSQL, Testes, CI/CD, Documentação]
