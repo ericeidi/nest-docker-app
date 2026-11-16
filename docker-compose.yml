@@ -5,11 +5,12 @@ services:
       target: runtime
     image: nest-docker-app:local
     container_name: nest-docker-app
+    # Só as variáveis da API (sem POSTGRES_*)
     env_file:
-      - .env
+      - .env.api
     ports:
-      # porta_da_maquina:porta_do_container
-      - "${HOST_PORT:-3000}:${PORT:-3000}"
+      # porta_da_maquina (HOST_PORT no .env) : porta interna fixa da API
+      - "${HOST_PORT:-3000}:3000"
     networks:
       - nest-net
     depends_on:
@@ -33,10 +34,9 @@ services:
     # Imagem pinada por versão + digest
     image: postgres:18.7-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015
     container_name: nest-docker-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+    # Só as variáveis do Postgres (sem DB_* da API)
+    env_file:
+      - .env.postgres
     volumes:
       # Postgres 18+: o volume é montado em /var/lib/postgresql (não mais em /data)
       - postgres-data:/var/lib/postgresql

@@ -11,28 +11,39 @@ Aplicação NestJS 12 + PostgreSQL 18 rodando via Docker Compose (runtime: OrbSt
 ## Primeira execução
 
 ```bash
-cp .env.example .env          # ajuste os valores se precisar
+cp .env.example .env                    # variáveis do compose
+cp .env.api.example .env.api            # variáveis da API
+cp .env.postgres.example .env.postgres  # variáveis do Postgres
+# troque "troque-me" pela mesma senha nos dois arquivos
 docker compose up -d --build  # build da imagem + sobe o container em background
 docker compose ps             # STATUS deve ficar "(healthy)"
 curl http://localhost:3000/health
 ```
 
-## Variáveis de ambiente (`.env`)
+## Variáveis de ambiente
 
-| Variável | Uso |
-|---|---|
-| `NODE_ENV` | Ambiente da aplicação |
-| `PORT` | Porta em que o Nest escuta **dentro** do container |
-| `HOST_PORT` | Porta exposta na sua máquina (`HOST_PORT:PORT`) |
-| `APP_NAME` | Exemplo de variável lida via `ConfigService` |
-| `DB_HOST` | Host do banco **visto pela API** = nome do serviço (`postgres`). Nunca `localhost` |
-| `DB_PORT` | Porta **interna** do Postgres (`5432`) |
-| `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Credenciais usadas pela API (TypeORM) |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Criação do banco pelo container Postgres — **só na primeira criação do volume** |
+Cada container recebe **somente** as próprias variáveis:
 
-- Nova variável: adicione no `.env` **e** no `.env.example` (sem valor real), depois rode `docker compose up -d` (recria o container com o novo env).
-- O `.env` nunca entra na imagem (`.dockerignore`) e não deve ser commitado.
-- Trocar a porta da máquina: altere `HOST_PORT=8080` → `docker compose up -d` → http://localhost:8080
+```
+.env           → docker-compose (interpolação do YAML)  → nenhum container
+.env.api       → env_file do serviço api                 → só a API
+.env.postgres  → env_file do serviço postgres            → só o Postgres
+```
+
+| Arquivo | Variável | Uso |
+|---|---|---|
+| `.env` | `HOST_PORT` | Porta exposta na sua máquina (`HOST_PORT:3000`) |
+| `.env.api` | `NODE_ENV` | Ambiente da aplicação |
+| `.env.api` | `PORT` | Porta interna do Nest — **mantenha 3000** (fixa no mapeamento) |
+| `.env.api` | `APP_NAME` | Exemplo de variável lida via `ConfigService` |
+| `.env.api` | `DB_HOST` | Host do banco **visto pela API** = nome do serviço (`postgres`). Nunca `localhost` |
+| `.env.api` | `DB_PORT` | Porta **interna** do Postgres (`5432`) |
+| `.env.api` | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Credenciais usadas pela API (TypeORM) |
+| `.env.postgres` | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Criação do banco — **só na primeira criação do volume** |
+
+- Nova variável: adicione no arquivo do serviço **e** no `.example` correspondente (sem valor real), depois `docker compose up -d` (recria o container com o novo env).
+- Nenhum `.env*` entra na imagem (`.dockerignore`) nem é commitado (`.gitignore`), exceto os `.example`.
+- Trocar a porta da máquina: `HOST_PORT=8080` no `.env` → `docker compose up -d` → http://localhost:8080
 
 ## Ciclo de vida
 
@@ -160,8 +171,8 @@ Verifica em camadas e para na primeira que falhar, mostrando causa provável e c
 | Simulação | Erro observado | Onde aparece | Causa / correção |
 |---|---|---|---|
 | `docker compose stop postgres` | `getaddrinfo ENOTFOUND postgres` | `/health/db` → **503**; `/health` segue **200** | Container parado **sai do DNS** (por isso ENOTFOUND, não ECONNREFUSED). `docker compose start postgres` — o pool reconecta sozinho |
-| `DB_HOST=postgress` (typo) | `Error: getaddrinfo ENOTFOUND postgress` | Logs da API: 4× `Unable to connect... Retrying`, depois a API **encerra** (~13s) | Nome ≠ serviço do compose. Corrija o `.env` → `docker compose up -d` |
-| `DB_PASSWORD` errada | `error: password authentication failed for user "nest_app"` | Logs da API, após os retries | `.env` ≠ senha do banco. Lembre: `POSTGRES_PASSWORD` só vale na 1ª criação do volume |
+| `DB_HOST=postgress` (typo) | `Error: getaddrinfo ENOTFOUND postgress` | Logs da API: 4× `Unable to connect... Retrying`, depois a API **encerra** (~13s) | Nome ≠ serviço do compose. Corrija o `.env.api` → `docker compose up -d` |
+| `DB_PASSWORD` errada | `error: password authentication failed for user "nest_app"` | Logs da API, após os retries | `.env.api` ≠ senha do banco. Lembre: `POSTGRES_PASSWORD` só vale na 1ª criação do volume |
 | `DB_HOST=localhost` | `connect ECONNREFUSED 127.0.0.1:5432` / `::1:5432` | Logs da API | `localhost` = o próprio container da API. Use `DB_HOST=postgres` |
 | API desconectada da `nest-net` | `curl` sem resposta (`000`) | Script: etapa 2 | Sem rede o container perde também a porta publicada. `docker network connect nest-net nest-docker-app` ou `docker compose up -d` |
 
@@ -183,7 +194,7 @@ O e2e usa **Testcontainers**: sobe um Postgres descartável (mesma imagem pinada
 | `port is already allocated` | Outra coisa usa a porta → `lsof -i :3000` ou mude `HOST_PORT` |
 | Container `unhealthy` | `docker compose logs api` e `docker inspect --format '{{json .State.Health}}' nest-docker-app` |
 | Alteração no código não aparece | Faltou `--build`: `docker compose up -d --build` |
-| Variável nova não aparece | `docker compose up -d` (recria) — `restart` não relê o `.env` |
+| Variável nova não aparece | `docker compose up -d` (recria) — `restart` não relê o `env_file` |
 | `docker: command not found` | Abra um terminal novo (OrbStack configura o PATH no `~/.zprofile`) |
 | API reiniciando em loop | Banco inalcançável no boot: após 5 tentativas a API encerra e o `restart` a sobe de novo → `./scripts/diagnosticar-conexao.sh` |
 | `/health` 200 mas `/health/db` 503 | API ok, banco não — veja a mensagem no JSON (`error.postgres.message`) |

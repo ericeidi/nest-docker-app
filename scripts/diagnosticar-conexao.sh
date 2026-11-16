@@ -59,8 +59,8 @@ usuarioBanco=$(variavel_api DB_USER); nomeBanco=$(variavel_api DB_NAME)
 senhaBanco=$(variavel_api DB_PASSWORD)
 for nomeVariavel in DB_HOST DB_PORT DB_USER DB_NAME DB_PASSWORD; do
   [ -z "$(variavel_api "$nomeVariavel")" ] && falhar "$nomeVariavel vazia no container da API" \
-    "variável ausente no .env ou container não foi recriado após alterar o .env" \
-    "confira o .env e rode docker compose up -d (restart NÃO relê o .env)"
+    "variável ausente no .env.api ou container não foi recriado após alterar o .env.api" \
+    "confira o .env.api e rode docker compose up -d (restart NÃO relê o env_file)"
 done
 ok "DB_HOST=$hostBanco DB_PORT=$portaBanco DB_USER=$usuarioBanco DB_NAME=$nomeBanco DB_PASSWORD=(oculta)"
 if [ "$hostBanco" = "localhost" ] || [ "$hostBanco" = "127.0.0.1" ]; then
@@ -103,9 +103,9 @@ if ! saidaPsql=$(docker exec -e PGPASSWORD="$senhaBanco" "$CONTAINER_BANCO" \
   if [[ "$saidaPsql" == *"password authentication failed"* ]]; then
     falhar "senha recusada para o usuário '$usuarioBanco'" \
       "DB_PASSWORD diferente da senha criada no banco. POSTGRES_PASSWORD só vale na PRIMEIRA criação do volume" \
-      "alinhe DB_PASSWORD no .env com a senha real, ou recrie o volume (APAGA OS DADOS): docker compose down -v && docker compose up -d"
+      "alinhe DB_PASSWORD (.env.api) com a senha real, ou recrie o volume (APAGA OS DADOS): docker compose down -v && docker compose up -d"
   elif [[ "$saidaPsql" == *"does not exist"* ]]; then
-    falhar "$saidaPsql" "DB_NAME ou DB_USER não existem no servidor" "alinhe DB_* com POSTGRES_* no .env (ou crie o banco/usuário)"
+    falhar "$saidaPsql" "DB_NAME ou DB_USER não existem no servidor" "alinhe DB_* (.env.api) com POSTGRES_* (.env.postgres) (ou crie o banco/usuário)"
   else
     falhar "$saidaPsql" "erro de conexão no nível do Postgres" "docker compose logs $SERVICO_BANCO --tail 50"
   fi
