@@ -115,15 +115,23 @@ if ! saidaPsql=$(docker exec -e PGPASSWORD="$senhaBanco" "$CONTAINER_BANCO" \
     psql -h "$hostBanco" -p "$portaBanco" -U "$usuarioBanco" -d "$nomeBanco" -tAc 'SELECT 1' 2>&1); then
   if [[ "$saidaPsql" == *"password authentication failed"* ]]; then
     falhar "senha recusada para o usuário '$usuarioBanco'" \
-      "DB_PASSWORD diferente da senha criada no banco. POSTGRES_PASSWORD só vale na PRIMEIRA criação do volume" \
-      "alinhe secrets/db_password.txt com a senha real, ou recrie o volume (APAGA OS DADOS): docker compose down -v && docker compose up -d"
+      "secrets/db_password.txt diferente da senha da role no banco" \
+      "sincronize a senha rodando: docker compose exec postgres /docker-entrypoint-initdb.d/01-criar-role-app.sh"
   elif [[ "$saidaPsql" == *"does not exist"* ]]; then
-    falhar "$saidaPsql" "DB_NAME ou DB_USER não existem no servidor" "alinhe DB_* (.env.api) com POSTGRES_* (.env.postgres) (ou crie o banco/usuário)"
+    falhar "$saidaPsql" "DB_NAME ou DB_USER não existem no servidor" \
+      "alinhe DB_USER/DB_NAME (.env.api) com APP_DB_USER/POSTGRES_DB (.env.postgres) e rode: docker compose exec postgres /docker-entrypoint-initdb.d/01-criar-role-app.sh"
   else
     falhar "$saidaPsql" "erro de conexão no nível do Postgres" "docker compose logs $SERVICO_BANCO --tail 50"
   fi
 fi
 ok "SELECT 1 → $saidaPsql"
+roleEhSuperuser=$(docker exec -e PGPASSWORD="$senhaBanco" "$CONTAINER_BANCO" \
+  psql -h "$hostBanco" -p "$portaBanco" -U "$usuarioBanco" -d "$nomeBanco" -tAc 'SELECT rolsuper FROM pg_roles WHERE rolname = current_user' 2>/dev/null)
+if [ "$roleEhSuperuser" = "t" ]; then
+  aviso "role '$usuarioBanco' é SUPERUSER — a API deve usar role com privilégios mínimos (ver DOCKER.md → Roles do banco)"
+else
+  ok "role '$usuarioBanco' sem superuser (privilégios mínimos)"
+fi
 
 # ---------------------------------------------------------------------------
 etapa 8 "Aplicação: /health/db e logs do TypeORM"

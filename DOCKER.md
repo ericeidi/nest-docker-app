@@ -14,7 +14,10 @@ Aplicação NestJS 12 + PostgreSQL 18 rodando via Docker Compose (runtime: OrbSt
 cp .env.example .env                    # variáveis do compose
 cp .env.api.example .env.api            # variáveis da API
 cp .env.postgres.example .env.postgres  # variáveis do Postgres
-mkdir -p secrets && openssl rand -hex 16 | tr -d '\n' > secrets/db_password.txt && chmod 600 secrets/db_password.txt
+mkdir -p secrets
+openssl rand -hex 16 | tr -d '\n' > secrets/db_password.txt              # senha da role da aplicação
+openssl rand -hex 16 | tr -d '\n' > secrets/postgres_admin_password.txt  # senha do superuser
+chmod 600 secrets/*.txt
 docker compose up -d --build  # build da imagem + sobe o container em background
 docker compose ps             # STATUS deve ficar "(healthy)"
 curl http://localhost:3000/health
@@ -39,21 +42,41 @@ Cada container recebe **somente** as próprias variáveis:
 | `.env.api` | `DB_HOST` | Host do banco **visto pela API** = nome do serviço (`postgres`). Nunca `localhost` |
 | `.env.api` | `DB_PORT` | Porta **interna** do Postgres (`5432`) |
 | `.env.api` | `DB_USER` / `DB_NAME` | Credenciais usadas pela API (TypeORM) |
-| `.env.postgres` | `POSTGRES_USER` / `POSTGRES_DB` | Criação do banco — **só na primeira criação do volume** |
-| `secrets/db_password.txt` | — | Senha do banco (Docker secret). **Não** é variável de ambiente |
+| `.env.postgres` | `POSTGRES_USER` / `POSTGRES_DB` | Superuser admin (`postgres_admin`) e banco — **só na primeira criação do volume** |
+| `.env.postgres` | `APP_DB_USER` | Role da aplicação (`nest_app`) criada pelo script de init. Deve bater com `DB_USER` |
+| `secrets/db_password.txt` | — | Senha da role da aplicação (Docker secret) |
+| `secrets/postgres_admin_password.txt` | — | Senha do superuser (Docker secret) — **só o container do banco recebe** |
 
 ### Senhas: Docker secrets
 
 ```
-secrets/db_password.txt ──(compose secrets:)──► /run/secrets/db_password
-        │                                           ├─ api      → DB_PASSWORD_FILE       → lerSegredo()
-        └─ fora do git e da imagem                  └─ postgres → POSTGRES_PASSWORD_FILE → entrypoint oficial
+secrets/db_password.txt ─────────────► /run/secrets/db_password
+        │                                ├─ api      → DB_PASSWORD_FILE     → lerSegredo()
+        │                                └─ postgres → APP_DB_PASSWORD_FILE → script de init (role da app)
+secrets/postgres_admin_password.txt ─► /run/secrets/postgres_admin_password
+        └─ fora do git e da imagem       └─ postgres → POSTGRES_PASSWORD_FILE → entrypoint oficial (superuser)
 ```
 
-- A senha **não** aparece em `docker inspect`, `docker compose config` nem em `printenv` dentro do container.
-- Dentro do container: arquivo `/run/secrets/db_password`, dono `node`, permissão `600`.
+- Nenhuma senha aparece em `docker inspect`, `docker compose config` nem em `printenv` dentro do container.
+- Dentro da API: só `/run/secrets/db_password` (dono `node`, permissão `600`). A senha do admin **não** chega na API.
 - A API aceita `DB_PASSWORD` direto como fallback (usado pelos testes e2e).
-- Trocar a senha de um volume existente: `ALTER ROLE ... PASSWORD` no banco **e** atualizar o arquivo; depois `docker compose up -d`.
+
+### Roles do banco (privilégios mínimos)
+
+| Role | Atributos | Quem usa |
+|---|---|---|
+| `postgres_admin` | superuser | Só manutenção manual (`docker compose exec postgres psql ...`) |
+| `nest_app` | `LOGIN`, **sem** superuser / `CREATEROLE` / `CREATEDB` / `REPLICATION` / `BYPASSRLS` | A API (TypeORM) |
+
+Privilégios do `nest_app`: `CONNECT` no `nest_app_db` (revogado de `PUBLIC`) + `USAGE, CREATE` no schema `public` (para migrations).
+Verificado: `CREATE ROLE` e `CREATE DATABASE` → `permission denied`.
+
+Script: `docker/postgres/init/01-criar-role-app.sh` — roda **sozinho** na primeira criação do volume e é **idempotente**:
+
+```bash
+# volume já existente, troca de senha da app (secrets/db_password.txt) ou role divergente:
+docker compose exec postgres /docker-entrypoint-initdb.d/01-criar-role-app.sh
+```
 
 - Nova variável: adicione no arquivo do serviço **e** no `.example` correspondente (sem valor real), depois `docker compose up -d` (recria o container com o novo env).
 - Nenhum `.env*` entra na imagem (`.dockerignore`) nem é commitado (`.gitignore`), exceto os `.example`.
@@ -136,8 +159,8 @@ docker system df       # espaço usado pelo Docker
 - **Acesso pelo Mac** (DBeaver/psql): descomente `ports: "127.0.0.1:5432:5432"` no serviço `postgres` e rode `docker compose up -d`.
 
 ```bash
-docker compose exec postgres psql -U nest_app -d nest_app_db          # console SQL
-docker compose exec postgres psql -U nest_app -d nest_app_db -c '\dt'  # listar tabelas
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'          # console SQL (admin)
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'  # listar tabelas
 docker compose exec api getent hosts postgres                          # DNS a partir da API
 docker compose exec api nc -zv postgres 5432                           # TCP a partir da API
 docker network inspect nest-net                                        # quem está na rede + IPs

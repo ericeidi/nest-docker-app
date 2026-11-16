@@ -43,13 +43,18 @@ services:
     env_file:
       - .env.postgres
     environment:
-      # Convenção da imagem oficial: lê a senha do arquivo em vez de POSTGRES_PASSWORD
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      # Senha do ADMIN (POSTGRES_USER, superuser) — convenção _FILE da imagem oficial
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      # Senha da role da APLICAÇÃO (sem superuser), usada pelo script de init
+      APP_DB_PASSWORD_FILE: /run/secrets/db_password
     secrets:
+      - postgres_admin_password
       - db_password
     volumes:
       # Postgres 18+: o volume é montado em /var/lib/postgresql (não mais em /data)
       - postgres-data:/var/lib/postgresql
+      # Cria a role da aplicação na primeira inicialização do volume
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     networks:
       - nest-net
     # Sem porta publicada: só a API (mesma rede) alcança o banco.
@@ -72,8 +77,12 @@ services:
 secrets:
   # Arquivo local fora do git (.gitignore) e fora da imagem (.dockerignore).
   # Montado em /run/secrets/db_password nos serviços que o declaram.
+  # Senha da role da aplicação (API + script de init do Postgres)
   db_password:
     file: ./secrets/db_password.txt
+  # Senha do superuser do Postgres — só o container do banco recebe
+  postgres_admin_password:
+    file: ./secrets/postgres_admin_password.txt
 
 networks:
   nest-net:
