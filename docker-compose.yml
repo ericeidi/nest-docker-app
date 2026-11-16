@@ -1,0 +1,69 @@
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    image: nest-docker-app:local
+    container_name: nest-docker-app
+    env_file:
+      - .env
+    ports:
+      # porta_da_maquina:porta_do_container
+      - "${HOST_PORT:-3000}:${PORT:-3000}"
+    networks:
+      - nest-net
+    depends_on:
+      postgres:
+        # só sobe a API depois que o Postgres passa no healthcheck
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT:-3000}/health || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    # Imagem pinada por versão + digest
+    image: postgres:18.7-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015
+    container_name: nest-docker-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Postgres 18+: o volume é montado em /var/lib/postgresql (não mais em /data)
+      - postgres-data:/var/lib/postgresql
+    networks:
+      - nest-net
+    # Sem porta publicada: só a API (mesma rede) alcança o banco.
+    # Para acessar do Mac (DBeaver/psql), descomente — preso a 127.0.0.1:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  nest-net:
+    name: nest-net
+    driver: bridge
+
+volumes:
+  postgres-data:
+    name: nest-docker-postgres-data

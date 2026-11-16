@@ -1,0 +1,22 @@
+# Dependências e build
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Variáveis de ambiente (contêm segredos) — só o template é versionado
+.env
+.env.*
+!.env.example
+
+# Backups do banco
+backups/
+
+# Logs e sistema
+*.log
+npm-debug.log*
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
