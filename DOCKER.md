@@ -42,6 +42,8 @@ Cada container recebe **somente** as próprias variáveis:
 | `.env.api` | `DB_HOST` | Host do banco **visto pela API** = nome do serviço (`postgres`). Nunca `localhost` |
 | `.env.api` | `DB_PORT` | Porta **interna** do Postgres (`5432`) |
 | `.env.api` | `DB_USER` / `DB_NAME` | Credenciais usadas pela API (TypeORM) |
+| `.env.api` | `CORS_ORIGINS` | Origens liberadas para CORS (vírgula). Vazio = nenhuma |
+| `.env.api` | `THROTTLE_TTL_MS` / `THROTTLE_LIMIT` | Rate limit: máx. `LIMIT` requisições por IP a cada `TTL_MS` (padrão 100/60000) |
 | `.env.postgres` | `POSTGRES_USER` / `POSTGRES_DB` | Superuser admin (`postgres_admin`) e banco — **só na primeira criação do volume** |
 | `.env.postgres` | `APP_DB_USER` | Role da aplicação (`nest_app`) criada pelo script de init. Deve bater com `DB_USER` |
 | `secrets/db_password.txt` | — | Senha da role da aplicação (Docker secret) |
@@ -143,6 +145,27 @@ runtime       (alpine puro) : libstdc++ + libgcc + binário node + node_modules 
 - Cache do npm entre builds via BuildKit (`--mount=type=cache`): mudanças só em `src/` reaproveitam as camadas de dependências.
 - O `HEALTHCHECK` está na imagem: `docker run` sem compose também reporta `healthy`/`unhealthy`.
 - O runtime usa o **mesmo Alpine** (3.24.4) da imagem do Node — exigência do binário (musl + `libstdc++`/`libgcc`, verificado com `ldd`). Ao atualizar o Node, confira a versão do Alpine dele.
+
+## Segurança HTTP da API
+
+Configurada em `src/seguranca/seguranca-http.ts` (usada pelo `main.ts` **e** pelos testes e2e — mesma configuração).
+
+| Proteção | Como | Verificado |
+|---|---|---|
+| Headers de segurança | `app.useSecurityHeaders()` nativo do Nest 12.1+ (mesmos padrões do helmet 8, sem dependência extra) | `Content-Security-Policy`, `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options`, `Referrer-Policy`, `Cross-Origin-Opener-Policy` |
+| Sem `X-Powered-By` | removido pelo `useSecurityHeaders()` | header ausente |
+| Rate limiting | `@nestjs/throttler` como guard global (`APP_GUARD`) | 105 requisições → **99×200 + 6×429** (limite 100, contando 1 `HEAD` anterior) |
+| Health checks isentos | `@SkipThrottle()` no `HealthController` | `/health` → 200 durante o bloqueio; container segue `healthy` |
+| CORS | `enableCors` só com origens de `CORS_ORIGINS` | origem listada recebe `Access-Control-Allow-Origin`; outra não |
+
+```bash
+curl -sI localhost:3000/ | grep -iE 'x-powered-by|content-security|x-ratelimit'   # headers
+for i in $(seq 1 105); do curl -s -o /dev/null -w '%{http_code}\n' localhost:3000/; done | sort | uniq -c
+```
+
+Limitações conhecidas:
+- Contador do rate limit **em memória**: zera a cada restart e não é compartilhado entre réplicas (com várias instâncias, usar storage Redis).
+- Atrás de proxy reverso/load balancer, todos os clientes aparecem com o IP do proxy — configurar `trust proxy` antes de publicar.
 
 ## Hardening dos containers
 
