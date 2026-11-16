@@ -11,6 +11,8 @@ services:
     environment:
       # Senha lida do arquivo montado pelo Docker secret (não fica no env/docker inspect)
       DB_PASSWORD_FILE: /run/secrets/db_password
+      # Heap do V8 limitado a 75% da memória do container (512M), para o GC agir antes do OOM kill
+      NODE_OPTIONS: --max-old-space-size=384
     secrets:
       - db_password
     ports:
@@ -33,6 +35,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
+    # ---------- Limites de recursos (medidos — ver DOCKER.md → Limites de recursos) ----------
+    # Pico medido sem limite: CPU 126%, 11 PIDs. NODE_OPTIONS (heap) definido em environment acima.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 64
     logging:
       driver: json-file
       options:
@@ -75,6 +85,18 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID]
     security_opt:
       - no-new-privileges:true
+    # ---------- Limites de recursos (medidos — ver DOCKER.md → Limites de recursos) ----------
+    # Postgres cria 1 processo por conexão: max_connections define o teto de PIDs.
+    #   max_connections=30  → pool da API (10) + folga para réplicas/admin
+    #   shared_buffers=128MB → 25% do limite de memória (512M)
+    #   pids=64              → 30 conexões + ~10 processos de background + folga
+    command: ["postgres", "-c", "max_connections=30", "-c", "shared_buffers=128MB"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 64
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s

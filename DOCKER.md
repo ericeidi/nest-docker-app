@@ -146,6 +146,51 @@ runtime       (alpine puro) : libstdc++ + libgcc + binário node + node_modules 
 - O `HEALTHCHECK` está na imagem: `docker run` sem compose também reporta `healthy`/`unhealthy`.
 - O runtime usa o **mesmo Alpine** (3.24.4) da imagem do Node — exigência do binário (musl + `libstdc++`/`libgcc`, verificado com `ldd`). Ao atualizar o Node, confira a versão do Alpine dele.
 
+## Limites de recursos
+
+Definidos a partir de medição (`autocannon` 9.0.0 + `docker stats`, 20 s por cenário, rate limit desligado durante a medição). Ambiente: OrbStack, 10 CPUs, 7,8 GiB.
+
+### Medições
+
+| Cenário | Sem limites | Com limites |
+|---|---|---|
+| Repouso | API 56,7 MiB / 11 PIDs · Postgres 25,7 MiB / 9 PIDs | — |
+| `GET /` · 50 conexões | 4.390 req/s · p99 26 ms · API pico **126% CPU / 500 MiB** | 3.169 req/s · p99 61 ms · API pico 104% / **196 MiB** |
+| `GET /health/db` · 50 conexões | 17.087 req/s · p99 5 ms · API 126% / 300 MiB · Postgres 52% / 41 MiB / 19 PIDs | 6.367 req/s · p99 48 ms · API 102% / **125 MiB** · Postgres 24% / 37 MiB / 19 PIDs |
+| `GET /health/db` · 200 conexões | 15.508 req/s · p99 24 ms · API 110% / 373 MiB | 6.759 req/s · p99 72 ms · API 102% / **127 MiB** |
+
+Zero erros, zero timeouts e zero OOM em todos os cenários.
+
+- **Memória da API sem limite (300–500 MiB):** o V8 não tem teto e adia o GC. Com `--max-old-space-size=384` o GC age antes e o pico cai para 125–196 MiB.
+- **Throughput menor com limites:** efeito do teto de 1 CPU. Troca consciente por previsibilidade; ainda ~3–6 mil req/s.
+
+### Limites aplicados
+
+| | API | Postgres |
+|---|---|---|
+| `cpus` | 1.0 | 1.0 |
+| `memory` | 512M | 512M |
+| `pids` | 64 (pico 14) | 64 (30 conexões + ~10 de background + folga) |
+| Ajuste interno | `NODE_OPTIONS=--max-old-space-size=384` (75% da memória) | `max_connections=30` (pool da API = 10), `shared_buffers=128MB` (25% da memória) |
+
+### Comportamento no limite (testado)
+
+Memória da API reduzida temporariamente para 72 MB sob carga:
+
+```
+oom → die exitCode=137 (SIGKILL do kernel) → start   (2 ciclos)
+```
+
+O kernel mata o container por OOM e o `restart: unless-stopped` o traz de volta. Para investigar:
+
+```bash
+docker events --since 10m --filter container=nest-docker-app --filter event=oom
+docker inspect -f 'Restarts={{.RestartCount}} OOMKilled={{.State.OOMKilled}}' nest-docker-app
+docker stats nest-docker-app nest-docker-postgres
+```
+
+`OOMKilled` volta a `false` após o restart — o histórico fica em `docker events`.
+
 ## Segurança HTTP da API
 
 Configurada em `src/seguranca/seguranca-http.ts` (usada pelo `main.ts` **e** pelos testes e2e — mesma configuração).
