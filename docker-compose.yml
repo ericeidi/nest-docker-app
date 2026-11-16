@@ -23,12 +23,7 @@ services:
         # só sobe a API depois que o Postgres passa no healthcheck
         condition: service_healthy
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT:-3000}/health || exit 1"]
-      interval: 15s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
+    # Health check definido no Dockerfile (HEALTHCHECK com node) — vale também fora do compose
     logging:
       driver: json-file
       options:
