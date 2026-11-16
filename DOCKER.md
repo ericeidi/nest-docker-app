@@ -144,6 +144,33 @@ runtime       (alpine puro) : libstdc++ + libgcc + binário node + node_modules 
 - O `HEALTHCHECK` está na imagem: `docker run` sem compose também reporta `healthy`/`unhealthy`.
 - O runtime usa o **mesmo Alpine** (3.24.4) da imagem do Node — exigência do binário (musl + `libstdc++`/`libgcc`, verificado com `ldd`). Ao atualizar o Node, confira a versão do Alpine dele.
 
+## Hardening dos containers
+
+| | API | Postgres |
+|---|---|---|
+| Usuário do processo | `node` (uid 1000) | `postgres` |
+| `cap_drop` | `ALL` | `ALL` |
+| `cap_add` | — | `CHOWN`, `DAC_OVERRIDE`, `SETUID`, `SETGID` |
+| Capabilities efetivas do processo principal (`CapEff`) | **0** | **0** |
+| `no-new-privileges` | ✅ | ✅ |
+| Filesystem | **somente leitura** + `/tmp` em memória (16 MB) | gravável (PGDATA no volume) |
+
+**Por que o Postgres precisa de 4 capabilities:** o entrypoint oficial começa como root, ajusta o PGDATA e troca para o usuário `postgres` — depois disso o processo roda com `CapEff: 0`. Conjunto mínimo **medido** (volume novo + reinício), removendo uma por vez:
+
+| Sem | Resultado |
+|---|---|
+| `CHOWN` | ❌ `chown: /var/lib/postgresql/18/docker: Operation not permitted` |
+| `DAC_OVERRIDE` | ❌ no reinício: `find: /var/lib/postgresql/18/docker: Permission denied` |
+| `SETUID` / `SETGID` | ❌ `failed switching to 'postgres': operation not permitted` |
+| `FOWNER` | ✅ desnecessária (só gera o aviso inofensivo `chmod: /var/run/postgresql: Operation not permitted` — o diretório já vem com a permissão certa da imagem) |
+
+```bash
+docker compose exec api sh -c 'grep CapEff /proc/1/status'   # 0000000000000000
+docker compose exec api touch /app/x                          # Read-only file system
+```
+
+Se a API precisar gravar algo novo em disco, use `/tmp` ou adicione outro `tmpfs`/volume — o resto do filesystem é somente leitura.
+
 ## Monitoramento e diagnóstico
 
 ```bash

@@ -24,6 +24,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
     # Health check definido no Dockerfile (HEALTHCHECK com node) — vale também fora do compose
+    # ---------- Hardening ----------
+    # Nenhuma capability do kernel: a API não precisa de nenhuma (porta 3000 > 1024, usuário node)
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Sistema de arquivos somente leitura; só /tmp gravável (em memória)
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
     logging:
       driver: json-file
       options:
@@ -57,6 +66,15 @@ services:
     # ports:
     #   - "127.0.0.1:5432:5432"
     restart: unless-stopped
+    # ---------- Hardening ----------
+    # Mínimo medido para o entrypoint oficial (volume novo + reinício):
+    #   CHOWN        → chown do PGDATA          (sem ela: "chown: Operation not permitted")
+    #   DAC_OVERRIDE → acessar PGDATA no restart (sem ela: "find: Permission denied")
+    #   SETUID/SETGID → trocar de root para postgres (sem elas: "failed switching to 'postgres'")
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
