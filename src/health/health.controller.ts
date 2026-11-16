@@ -1,8 +1,11 @@
 import { Controller, Get } from '@nestjs/common';
 import { HealthCheck, HealthCheckService, TypeOrmHealthIndicator } from '@nestjs/terminus';
+import { SkipThrottle } from '@nestjs/throttler';
 
 const TIMEOUT_PING_BANCO_MS = 3000;
 
+// Health checks fora do rate limit: o HEALTHCHECK do Docker não pode receber 429
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(
