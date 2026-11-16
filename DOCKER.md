@@ -120,6 +120,30 @@ curl localhost:3000/health/db                                          # ping do
 docker compose logs postgres --tail 50                                 # logs do banco
 ```
 
+## Validação de persistência
+
+```bash
+./scripts/validar-persistencia.sh
+```
+
+Grava um marcador → `docker compose down` (**sem** `-v`) → `docker compose up -d` → lê o marcador no container novo → remove a tabela de teste.
+
+Resultado real (16/11/2026):
+
+| | Antes | Depois |
+|---|---|---|
+| ID do container Postgres | `20cdea879b9b` | `27966dfcce81` (novo) |
+| IP na `nest-net` | `192.168.107.2` | `192.168.97.2` (mudou) |
+| Marcador | gravado | **lido** ✔ |
+| `/health/db` | ok | ok (API reconectou pelo nome `postgres`) |
+
+O container e o IP mudam; o **dado** (volume) e o **nome DNS** permanecem.
+
+| Comando | Dados |
+|---|---|
+| `docker compose down` / `up -d` / `--force-recreate` / nova imagem | ✅ preservados |
+| `docker compose down -v` · `docker volume rm` · `docker volume prune` | ❌ **apagados** |
+
 ## Diagnóstico de falhas de conexão
 
 ```bash
