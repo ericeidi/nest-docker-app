@@ -120,6 +120,30 @@ docker compose exec api ps aux              # processos rodando
 docker compose exec api wget -qO- http://127.0.0.1:3000/health
 ```
 
+> A imagem de runtime **não tem npm/yarn/corepack**. Comandos `npm ...` só funcionam na máquina local ou no estágio de build.
+
+## Imagem
+
+Três estágios no `Dockerfile`:
+
+```
+deps-producao (node alpine) : npm ci --omit=dev --ignore-scripts → node_modules de produção
+build         (node alpine) : npm ci --ignore-scripts → nest build → dist/
+runtime       (alpine puro) : libstdc++ + libgcc + binário node + node_modules + dist  (usuário node, uid 1000)
+```
+
+| | Antes | Depois |
+|---|---|---|
+| Tamanho | 341,1 MB | **295,6 MB** (−45,5 MB, −13%) |
+| Build sem cache | 21 s | **17 s** |
+| npm / yarn / corepack no runtime | presentes | **ausentes** |
+| Scripts de instalação de terceiros | executados | **bloqueados** (`--ignore-scripts`) |
+| Health check | só no compose (`wget`) | **no `Dockerfile`** (`node` + `fetch`) |
+
+- Cache do npm entre builds via BuildKit (`--mount=type=cache`): mudanças só em `src/` reaproveitam as camadas de dependências.
+- O `HEALTHCHECK` está na imagem: `docker run` sem compose também reporta `healthy`/`unhealthy`.
+- O runtime usa o **mesmo Alpine** (3.24.4) da imagem do Node — exigência do binário (musl + `libstdc++`/`libgcc`, verificado com `ldd`). Ao atualizar o Node, confira a versão do Alpine dele.
+
 ## Monitoramento e diagnóstico
 
 ```bash
