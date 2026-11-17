@@ -1,0 +1,110 @@
+#cloud-config
+# Postgres em container na VM Container-Optimized OS.
+# No COS o /etc é efêmero e o cloud-init roda a cada boot: unit e scripts são recriados sempre.
+# Os dados ficam no disco anexado (/mnt/disks/pgdata), que persiste entre reboots.
+
+write_files:
+  # Formata (só se ainda não tiver filesystem) e monta o disco de dados
+  - path: /var/lib/nest/preparar-disco.sh
+    permissions: "0644"
+    owner: root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      DISPOSITIVO=/dev/disk/by-id/google-pgdata
+      PONTO_MONTAGEM=/mnt/disks/pgdata
+
+      if ! blkid "$DISPOSITIVO" >/dev/null 2>&1; then
+        echo "Disco de dados sem filesystem: formatando (primeiro boot)"
+        mkfs.ext4 -m 0 -F -E lazy_itable_init=0,lazy_journal_init=0,discard "$DISPOSITIVO"
+      fi
+
+      mkdir -p "$PONTO_MONTAGEM"
+      mountpoint -q "$PONTO_MONTAGEM" || mount -o discard,defaults "$DISPOSITIVO" "$PONTO_MONTAGEM"
+
+      mkdir -p "$PONTO_MONTAGEM/data" "$PONTO_MONTAGEM/init" "$PONTO_MONTAGEM/secrets"
+      # Script de init da role da aplicação (executável, lido pelo entrypoint do Postgres)
+      install -m 0755 /var/lib/nest/init/01-criar-role-app.sh "$PONTO_MONTAGEM/init/01-criar-role-app.sh"
+      # HOME gravável para o docker-credential-gcr
+      mkdir -p /home/cloudservice
+
+  # Lê as senhas do Secret Manager com o token da service account da VM (sem gcloud no COS)
+  - path: /var/lib/nest/buscar-segredos.sh
+    permissions: "0644"
+    owner: root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      DESTINO=/mnt/disks/pgdata/secrets
+      # UID/GID do usuário postgres na imagem alpine oficial
+      UID_POSTGRES=70
+
+      TOKEN=$(curl -sf -H 'Metadata-Flavor: Google' \
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+        | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+      [ -n "$TOKEN" ] || { echo "Falha ao obter token da service account" >&2; exit 1; }
+
+      for NOME_SEGREDO in ${segredo_app} ${segredo_admin}; do
+        curl -sf -H "Authorization: Bearer $TOKEN" \
+          "https://secretmanager.googleapis.com/v1/projects/${projeto_id}/secrets/$NOME_SEGREDO/versions/latest:access" \
+          | grep -o '"data": *"[^"]*"' | cut -d'"' -f4 | base64 -d > "$DESTINO/$NOME_SEGREDO"
+        # Mensagem só com o nome do segredo, nunca o valor
+        [ -s "$DESTINO/$NOME_SEGREDO" ] || { echo "Segredo vazio ou inacessível: $NOME_SEGREDO" >&2; exit 1; }
+        chown "$UID_POSTGRES:$UID_POSTGRES" "$DESTINO/$NOME_SEGREDO"
+        chmod 0400 "$DESTINO/$NOME_SEGREDO"
+      done
+      chown "$UID_POSTGRES:$UID_POSTGRES" "$DESTINO"
+      chmod 0500 "$DESTINO"
+
+  # Mesmo script do docker-compose (docker/postgres/init/01-criar-role-app.sh)
+  - path: /var/lib/nest/init/01-criar-role-app.sh
+    permissions: "0755"
+    owner: root
+    content: |
+      ${indent(6, script_criar_role_app)}
+
+  - path: /etc/systemd/system/postgres.service
+    permissions: "0644"
+    owner: root
+    content: |
+      [Unit]
+      Description=PostgreSQL (container) da nest-docker-app
+      Wants=network-online.target docker.service
+      After=network-online.target docker.service
+
+      [Service]
+      Environment=HOME=/home/cloudservice
+      TimeoutStartSec=300
+      ExecStartPre=/bin/bash /var/lib/nest/preparar-disco.sh
+      ExecStartPre=/bin/bash /var/lib/nest/buscar-segredos.sh
+      # Firewall do COS bloqueia entrada por padrão: libera 5432 só para a subnet (idempotente)
+      ExecStartPre=/bin/bash -c 'iptables -w -C INPUT -p tcp --dport 5432 -s ${faixa_subnet} -j ACCEPT || iptables -w -A INPUT -p tcp --dport 5432 -s ${faixa_subnet} -j ACCEPT'
+      ExecStartPre=/usr/bin/docker-credential-gcr configure-docker --registries ${registro_docker}
+      ExecStartPre=-/usr/bin/docker rm -f postgres
+      # Mesmo hardening do docker-compose; memória limitada para caber no e2-micro (1 GB)
+      ExecStart=/usr/bin/docker run --rm --name postgres \
+        --network host \
+        --memory 640m --pids-limit 64 \
+        --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add SETUID --cap-add SETGID \
+        --security-opt no-new-privileges:true \
+        --log-driver gcplogs \
+        -e POSTGRES_USER=${banco_usuario_admin} \
+        -e POSTGRES_DB=${banco_nome} \
+        -e POSTGRES_PASSWORD_FILE=/run/secrets/${segredo_admin} \
+        -e APP_DB_USER=${banco_usuario_app} \
+        -e APP_DB_PASSWORD_FILE=/run/secrets/${segredo_app} \
+        -v /mnt/disks/pgdata/data:/var/lib/postgresql \
+        -v /mnt/disks/pgdata/secrets:/run/secrets:ro \
+        -v /mnt/disks/pgdata/init:/docker-entrypoint-initdb.d:ro \
+        ${imagem_postgres} \
+        postgres -c max_connections=30 -c shared_buffers=128MB
+      ExecStop=/usr/bin/docker stop -t 30 postgres
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl daemon-reload
+  - systemctl start postgres.service

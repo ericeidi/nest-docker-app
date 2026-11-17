@@ -1,0 +1,5 @@
+# cp terraform.tfvars.example terraform.tfvars (gitignored)
+projeto_id            = "nest-docker-lab-xxxxxx"
+conta_faturamento     = "XXXXXX-XXXXXX-XXXXXX"
+repositorio_github    = "owner/nest-docker-app"
+repositorio_github_id = "0000000000" # gh api repos/<owner>/<repo> --jq .id
