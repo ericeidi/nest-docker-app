@@ -25,3 +25,10 @@ npm-debug.log*
 # Docker secrets (só os .example são versionados)
 secrets/*
 !secrets/*.example
+
+# Terraform (state contém senhas geradas; tfvars contém IDs da conta)
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log

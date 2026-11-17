@@ -1,0 +1,6 @@
+# cp terraform.tfvars.example terraform.tfvars (gitignored)
+# Só o que não pode ir para o repo público. O resto fica em envs/<ambiente>.tfvars
+# No CI estes valores vêm das variáveis do environment do GitHub (TF_VAR_*).
+
+conta_faturamento = "XXXXXX-XXXXXX-XXXXXX" # gcloud billing accounts list
+tag_imagem_api    = "v1"

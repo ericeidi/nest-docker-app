@@ -1,0 +1,17 @@
+# Ambiente dev — free tier.
+#   terraform init -reconfigure -backend-config=envs/dev.backend.hcl
+#   terraform plan -var-file=envs/dev.tfvars
+# conta_faturamento e tag_imagem_api NÃO ficam aqui (repo público):
+# localmente em terraform.tfvars, no CI em variáveis do environment do GitHub (TF_VAR_*).
+
+projeto_id = "nest-docker-lab-dexicm"
+regiao     = "us-central1"
+zona       = "us-central1-a"
+
+tipo_maquina_postgres  = "e2-micro"
+tamanho_disco_dados_gb = 20
+max_instancias_api     = 1
+api_publica            = true
+
+orcamento_moeda = "BRL"
+orcamento_valor = 30
