@@ -13,5 +13,8 @@ tamanho_disco_dados_gb = 20
 max_instancias_api     = 1
 api_publica            = true
 
+# Rate limiting: requisições por IP a cada THROTTLE_TTL_MS (default 100)
+throttle_limite = 200
+
 orcamento_moeda = "BRL"
 orcamento_valor = 30
