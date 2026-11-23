@@ -59,6 +59,18 @@ variable "max_instancias_api" {
   default     = 1
 }
 
+variable "max_instancias_worker" {
+  description = "Máximo de instâncias do nest-worker (teto de custo e de conexões no Postgres)"
+  type        = number
+  default     = 1
+}
+
+variable "concorrencia_worker" {
+  description = "Mensagens processadas ao mesmo tempo por instância do worker"
+  type        = number
+  default     = 10
+}
+
 # ---------- Imagens ----------
 variable "tag_imagem_api" {
   description = "Tag da imagem da API no Artifact Registry (ex.: v1)"
@@ -126,4 +138,33 @@ variable "orcamento_moeda" {
   description = "Moeda da conta de faturamento (precisa ser a MESMA da conta: USD ou BRL)"
   type        = string
   default     = "USD"
+}
+
+# ---------- Mensageria ----------
+variable "prazo_ack_pubsub_segundos" {
+  description = "Tempo que o Pub/Sub espera a resposta do worker antes de reentregar (10–600). O job precisa terminar nesse prazo"
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.prazo_ack_pubsub_segundos >= 10 && var.prazo_ack_pubsub_segundos <= 600
+    error_message = "O Pub/Sub aceita ack deadline entre 10 e 600 segundos."
+  }
+}
+
+variable "tentativas_entrega_pubsub" {
+  description = "Entregas ao worker antes de mandar a mensagem para a DLQ (5–100)"
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.tentativas_entrega_pubsub >= 5 && var.tentativas_entrega_pubsub <= 100
+    error_message = "O Pub/Sub aceita max_delivery_attempts entre 5 e 100."
+  }
+}
+
+variable "agenda_relay_outbox" {
+  description = "Cron do Cloud Scheduler que drena o outbox no worker (UTC)"
+  type        = string
+  default     = "* * * * *"
 }
