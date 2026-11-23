@@ -43,6 +43,10 @@ GRANT CONNECT ON DATABASE :"banco" TO :"usuario_app";
 
 -- Schema public: usar e criar objetos (necessário para migrations)
 GRANT USAGE, CREATE ON SCHEMA public TO :"usuario_app";
+
+-- Criar schemas no banco: a migration do @nestjs/outbox executa
+-- CREATE SCHEMA IF NOT EXISTS nest_outbox (exige CREATE no banco mesmo se o schema já existir)
+GRANT CREATE ON DATABASE :"banco" TO :"usuario_app";
 SQL
 
 echo "Role '$APP_DB_USER' pronta (sem superuser) no banco '$POSTGRES_DB'."

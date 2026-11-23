@@ -1,53 +1,166 @@
+# ---------- Base comum dos serviços que rodam a imagem da aplicação ----------
+# api, worker e os jobs de uma execução (migracoes, pubsub-setup) usam a MESMA imagem.
+x-imagem-app: &imagem-app
+  build:
+    context: .
+    target: runtime
+  image: nest-docker-app:local
+  networks:
+    - nest-net
+  # ---------- Hardening ----------
+  # Nenhuma capability do kernel: a aplicação não precisa de nenhuma (porta 3000 > 1024, usuário node)
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  # Sistema de arquivos somente leitura; só /tmp gravável (em memória)
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# Variáveis de banco e de mensageria comuns a api, worker e migracoes
+x-ambiente-app: &ambiente-app
+  # Senha lida do arquivo montado pelo Docker secret (não fica no env/docker inspect)
+  DB_PASSWORD_FILE: /run/secrets/db_password
+  # Heap do V8 limitado a 75% da memória do container (512M), para o GC agir antes do OOM kill
+  NODE_OPTIONS: --max-old-space-size=384
+  # Client do Pub/Sub aponta para o emulador (nunca para um projeto GCP real)
+  PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+  PUBSUB_PROJETO_ID: nest-local
+  PUBSUB_TOPICO_EVENTOS: eventos-app
+  # Processo sempre ligado: relay em loop contínuo
+  OUTBOX_RELAY_MODO: continuo
+
+# ---------- Limites de recursos (medidos — ver DOCKER.md → Limites de recursos) ----------
+# Pico medido sem limite (api): CPU 126%, 11 PIDs. NODE_OPTIONS (heap) definido em x-ambiente-app.
+x-limites-app: &limites-app
+  resources:
+    limits:
+      cpus: "1.0"
+      memory: 512M
+      pids: 64
+
 services:
   api:
-    build:
-      context: .
-      target: runtime
-    image: nest-docker-app:local
+    <<: *imagem-app
     container_name: nest-docker-app
     # Só as variáveis da API (sem POSTGRES_*)
     env_file:
       - .env.api
     environment:
-      # Senha lida do arquivo montado pelo Docker secret (não fica no env/docker inspect)
-      DB_PASSWORD_FILE: /run/secrets/db_password
-      # Heap do V8 limitado a 75% da memória do container (512M), para o GC agir antes do OOM kill
-      NODE_OPTIONS: --max-old-space-size=384
+      <<: *ambiente-app
+      MODO_APP: api
+      # Rota pública POST /demo/tarefas (demonstração da mensageria)
+      DEMO_MENSAGERIA_HABILITADA: "true"
     secrets:
       - db_password
     ports:
       # porta_da_maquina (HOST_PORT no .env) : porta interna fixa da API
       - "${HOST_PORT:-3000}:3000"
-    networks:
-      - nest-net
     depends_on:
       postgres:
         # só sobe a API depois que o Postgres passa no healthcheck
         condition: service_healthy
+      migracoes:
+        # schema nest_outbox precisa estar na versão do pacote (API sobe com migrate: false)
+        condition: service_completed_successfully
+      pubsub-setup:
+        condition: service_completed_successfully
     restart: unless-stopped
     # Health check definido no Dockerfile (HEALTHCHECK com node) — vale também fora do compose
-    # ---------- Hardening ----------
-    # Nenhuma capability do kernel: a API não precisa de nenhuma (porta 3000 > 1024, usuário node)
-    cap_drop: [ALL]
+    deploy: *limites-app
+
+  # Mesma imagem da API em modo worker: recebe o push do Pub/Sub e roda os jobs.
+  # Sem porta publicada: só o emulador do Pub/Sub (mesma rede) chama o worker.
+  worker:
+    <<: *imagem-app
+    container_name: nest-docker-worker
+    env_file:
+      - .env.api
+    environment:
+      <<: *ambiente-app
+      MODO_APP: worker
+    secrets:
+      - db_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migracoes:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    deploy: *limites-app
+
+  # Job de uma execução: aplica as migrations do schema nest_outbox antes de api/worker subirem.
+  # No GCP o equivalente é um Cloud Run Job rodado antes do deploy.
+  migracoes:
+    <<: *imagem-app
+    container_name: nest-docker-migracoes
+    command: ["node", "dist/scripts/migrar-outbox.js"]
+    env_file:
+      - .env.api
+    environment:
+      <<: *ambiente-app
+    secrets:
+      - db_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    deploy: *limites-app
+
+  # Emulador oficial do Pub/Sub (imagem do gcloud CLI, pinada por versão + digest).
+  # Estado só em memória: tópicos e mensagens somem ao reiniciar (pubsub-setup recria).
+  pubsub-emulator:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:592.0.0-emulators@sha256:c3b114528245d315af73d92d95d8e2fed9747ce29003ad46232f22b4542da036
+    container_name: nest-docker-pubsub
+    command: ["gcloud", "beta", "emulators", "pubsub", "start", "--host-port=0.0.0.0:8085", "--project=nest-local"]
+    networks:
+      - nest-net
+    # Sem porta publicada. Para inspecionar do Mac, descomente — preso a 127.0.0.1:
+    # ports:
+    #   - "127.0.0.1:8085:8085"
+    healthcheck:
+      # Abre uma conexão TCP na porta do emulador (não depende de curl na imagem)
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8085'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
     security_opt:
       - no-new-privileges:true
-    # Sistema de arquivos somente leitura; só /tmp gravável (em memória)
-    read_only: true
-    tmpfs:
-      - /tmp:size=16m,mode=1777
-    # ---------- Limites de recursos (medidos — ver DOCKER.md → Limites de recursos) ----------
-    # Pico medido sem limite: CPU 126%, 11 PIDs. NODE_OPTIONS (heap) definido em environment acima.
     deploy:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
-          pids: 64
+          # Emulador roda na JVM
+          memory: 768M
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Job de uma execução: cria no emulador os tópicos, a DLQ e a assinatura push para o worker
+  # (no GCP quem cria é o Terraform). Recusa rodar sem PUBSUB_EMULATOR_HOST.
+  pubsub-setup:
+    <<: *imagem-app
+    container_name: nest-docker-pubsub-setup
+    command: ["node", "dist/scripts/configurar-pubsub-local.js"]
+    environment:
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+      PUBSUB_PROJETO_ID: nest-local
+      PUBSUB_TOPICO_EVENTOS: eventos-app
+      PUBSUB_URL_PUSH_WORKER: http://worker:3000/internal/eventos
+    depends_on:
+      pubsub-emulator:
+        condition: service_healthy
+    restart: "no"
+    deploy: *limites-app
 
   postgres:
     # Imagem pinada por versão + digest

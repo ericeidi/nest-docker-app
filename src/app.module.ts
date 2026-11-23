@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConditionalModule, ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
+import { MensageriaModule } from './mensageria/mensageria.module.js';
+import { DemoProdutorModule } from './demo/demo-produtor.module.js';
 
 const JANELA_RATE_LIMIT_PADRAO_MS = 60000;
 const LIMITE_REQUISICOES_PADRAO = 100;
@@ -25,6 +27,13 @@ const LIMITE_REQUISICOES_PADRAO = 100;
     }),
     DatabaseModule,
     HealthModule,
+    // Outbox + publicação no Pub/Sub (produtores chamam Outbox.add() nas transações)
+    MensageriaModule,
+    // Rota pública de demonstração: só com DEMO_MENSAGERIA_HABILITADA=true
+    ConditionalModule.registerWhen(
+      DemoProdutorModule,
+      (variaveisAmbiente) => variaveisAmbiente.DEMO_MENSAGERIA_HABILITADA === 'true',
+    ),
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
