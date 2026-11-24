@@ -33,6 +33,9 @@ describe('AppController (e2e)', () => {
     process.env.THROTTLE_LIMIT = String(LIMITE_REQUISICOES_TESTE);
     process.env.THROTTLE_TTL_MS = '60000';
     process.env.CORS_ORIGINS = ORIGEM_PERMITIDA;
+    // Schema nest_outbox criado na inicialização e relay sem loop em background
+    process.env.OUTBOX_MIGRAR_NA_INICIALIZACAO = 'true';
+    process.env.OUTBOX_RELAY_MODO = 'sob-demanda';
   });
 
   // App novo por teste: o contador do rate limit (em memória) começa zerado
