@@ -12,6 +12,8 @@ function criarDisparador(modoRelay: ModoRelay, relay: Partial<OutboxRelay>): Dis
     topicoEventos: 'eventos-app',
     modoRelay,
     migrarNaInicializacao: false,
+    retencaoInboxDias: 30,
+    retencaoDeadLettersDias: 14,
   };
   return new DisparadorRelay(relay as OutboxRelay, configuracao);
 }

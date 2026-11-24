@@ -32,3 +32,13 @@ output "comando_ler_dlq" {
   description = "Lê (sem confirmar) até 10 mensagens da DLQ"
   value       = "gcloud pubsub subscriptions pull ${google_pubsub_subscription.eventos_dlq_inspecao.name} --limit 10 --project ${var.projeto_id}"
 }
+
+output "comando_listar_dead_letters_outbox" {
+  description = "Lista as dead letters do outbox (publicações esgotadas), sem payload. Worker é privado: usa seu identity token"
+  value       = "curl -s -H \"Authorization: Bearer $(gcloud auth print-identity-token)\" '${google_cloud_run_v2_service.worker.uri}/internal/outbox/dead-letters?limit=50'"
+}
+
+output "comando_reenfileirar_dead_letter_outbox" {
+  description = "Devolve uma dead letter ao outbox (troque <ID>); o relay publica de novo em até 1 minuto"
+  value       = "curl -s -X POST -o /dev/null -w '%%{http_code}\\n' -H \"Authorization: Bearer $(gcloud auth print-identity-token)\" '${google_cloud_run_v2_service.worker.uri}/internal/outbox/dead-letters/<ID>/requeue'"
+}

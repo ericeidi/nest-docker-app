@@ -170,6 +170,16 @@ gcloud pubsub subscriptions pull eventos-app-dlq-inspecao --auto-ack --limit 10 
 
 Replay: corrija a causa, leia a mensagem e republique em `eventos-app` com os mesmos atributos (`idEvento`, `topico`) — o worker deduplica pelo `idEvento`.
 
+DLQ do Pub/Sub = falha ao **processar**. Falha ao **publicar** vai para as dead letters do outbox, no Postgres:
+
+```bash
+$(terraform output -raw comando_listar_dead_letters_outbox)        # lista, sem payload
+# requeue: copie o comando, troque <ID> e rode
+terraform output -raw comando_reenfileirar_dead_letter_outbox
+```
+
+Retenção: o Scheduler `manutencao-outbox` limpa inbox (30 dias) e dead letters (14 dias) uma vez por dia. Detalhes em `docs/mensageria.md`.
+
 ### Conexões no Postgres
 
 Cada instância (API ou worker) abre um pool de até `pool_conexoes_banco` conexões (variável `DB_POOL_MAX`, default 10), e o Postgres aceita `max_connections=30`:
