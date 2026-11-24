@@ -2,7 +2,7 @@
 #   terraform init -reconfigure -backend-config=envs/dev.backend.hcl
 #   terraform plan -var-file=envs/dev.tfvars
 # conta_faturamento e tag_imagem_api NÃO ficam aqui (repo público):
-# localmente em terraform.tfvars, no CI em variáveis do environment do GitHub (TF_VAR_*).
+# localmente em terraform.tfvars; no CI a conta vem de variável do GitHub e a tag do commit (ver .github/workflows/terraform.yml).
 
 projeto_id = "nest-docker-lab-dexicm"
 regiao     = "us-central1"

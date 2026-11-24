@@ -1,6 +1,8 @@
-# Terraform da infra GCP (ambiente dev).
-#   PR que altera infra/terraform → fmt, validate, plan e comentário com o plan no PR
-#   push na main                  → apply, após aprovação manual no environment "dev"
+# Infra GCP (Terraform) e deploy da aplicação no ambiente dev.
+#   PR que altera infra/terraform → fmt, validate, plan (com a imagem em uso) e comentário com o plan no PR
+#   push na main                  → imagem (build + push, tag = SHA do commit)
+#                                   → deploy, após aprovação manual no environment "dev":
+#                                     job de migração do outbox com a imagem nova → plan → apply
 #
 # Autenticação no GCP: Workload Identity Federation (OIDC) — sem chave JSON.
 # Pool/provider/SA criados em infra/bootstrap.
@@ -9,7 +11,9 @@
 #   GCP_WORKLOAD_IDENTITY_PROVIDER  terraform -chdir=infra/bootstrap output -raw workload_identity_provider
 #   GCP_SERVICE_ACCOUNT             terraform -chdir=infra/bootstrap output -raw service_account_ci
 #   GCP_BILLING_ACCOUNT             ID da conta de faturamento
-#   API_IMAGE_TAG                   tag da imagem da API já publicada no Artifact Registry
+#
+# A tag da imagem não é mais variável do repositório: o deploy usa o SHA do commit e o plan
+# de PR lê a tag em uso no Cloud Run (um PR de infra não troca a imagem).
 #
 # Actions pinadas por SHA completo (tag é mutável).
 
@@ -22,9 +26,10 @@ on:
       - ".github/workflows/terraform.yml"
   push:
     branches: [main]
-    paths:
-      - "infra/terraform/**"
-      - ".github/workflows/terraform.yml"
+    # Mudança só de documentação não gera imagem nem deploy
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
 
 # Nenhuma permissão por padrão; cada job declara o mínimo
 permissions: {}
@@ -39,7 +44,11 @@ env:
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
   TF_VAR_conta_faturamento: ${{ vars.GCP_BILLING_ACCOUNT }}
-  TF_VAR_tag_imagem_api: ${{ vars.API_IMAGE_TAG }}
+  # Mesmos valores de infra/terraform/envs/dev.tfvars
+  PROJETO_GCP: nest-docker-lab-dexicm
+  REGIAO_GCP: us-central1
+  SERVICO_API: nest-api
+  JOB_MIGRACOES: nest-migracoes
 
 jobs:
   plan:
@@ -64,6 +73,16 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Instalar gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Tag da imagem em uso
+        run: |
+          IMAGEM_EM_USO=$(gcloud run services describe "$SERVICO_API" --region "$REGIAO_GCP" --project "$PROJETO_GCP" \
+            --format='value(spec.template.spec.containers[0].image)')
+          echo "Imagem em uso: $IMAGEM_EM_USO"
+          echo "TF_VAR_tag_imagem_api=${IMAGEM_EM_USO##*:}" >> "$GITHUB_ENV"
 
       - name: Instalar Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
@@ -109,16 +128,54 @@ jobs:
           } > comentario.md
           gh pr comment "$NUMERO_PR" --body-file comentario.md
 
-  apply:
-    name: apply (dev)
+  imagem:
+    name: imagem
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Autenticar no GCP (OIDC)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Instalar gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Tag pelo commit
+        id: tag
+        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build e push
+        env:
+          TAG_IMAGEM: ${{ steps.tag.outputs.tag }}
+        run: |
+          IMAGEM="${REGIAO_GCP}-docker.pkg.dev/${PROJETO_GCP}/app/nest-api:${TAG_IMAGEM}"
+          gcloud auth configure-docker "${REGIAO_GCP}-docker.pkg.dev" --quiet
+          docker build --platform linux/amd64 --target runtime -t "$IMAGEM" .
+          docker push "$IMAGEM"
+
+  deploy:
+    name: deploy (dev)
+    needs: imagem
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Aprovação manual configurada no environment "dev"
+    # Aprovação manual configurada no environment "dev" (antes de tocar no banco)
     environment: dev
     permissions:
       contents: read
       id-token: write
+    env:
+      TF_VAR_tag_imagem_api: ${{ needs.imagem.outputs.tag }}
     defaults:
       run:
         working-directory: infra/terraform
@@ -131,6 +188,17 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Instalar gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      # API e worker sobem com migrate: false: o schema nest_outbox precisa estar em dia antes do apply.
+      # O job já aponta para a imagem nova aqui, então o apply não vê diferença nele.
+      - name: Migração do outbox com a imagem nova
+        run: |
+          IMAGEM="${REGIAO_GCP}-docker.pkg.dev/${PROJETO_GCP}/app/nest-api:${TF_VAR_tag_imagem_api}"
+          gcloud run jobs update "$JOB_MIGRACOES" --image "$IMAGEM" --region "$REGIAO_GCP" --project "$PROJETO_GCP" --quiet
+          gcloud run jobs execute "$JOB_MIGRACOES" --region "$REGIAO_GCP" --project "$PROJETO_GCP" --wait
 
       - name: Instalar Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
