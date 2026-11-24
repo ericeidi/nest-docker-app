@@ -103,7 +103,7 @@ terraform apply -var-file=envs/dev.tfvars
 curl "$(terraform output -raw api_url)/health/db"
 ```
 
-Nova versão da API: build/push com outra tag (ex.: `v2`) e atualize `tag_imagem_api` (local) / `API_IMAGE_TAG` (GitHub).
+Nova versão da API: merge na `main` — o CI faz build/push com a tag `sha-<commit>`, roda a migração e aplica (seção 4). Para um plan local sem trocar a imagem, use a tag em uso: `gcloud run services describe nest-api --region us-central1 --format='value(spec.template.spec.containers[0].image)'`.
 
 ### Ambientes
 
@@ -118,16 +118,20 @@ terraform plan -var-file=envs/prod.tfvars
 
 ## 4. CI/CD (GitHub Actions)
 
-`.github/workflows/terraform.yml`, disparado por mudanças em `infra/terraform/**`:
+Dois workflows:
 
-| Evento | O que roda |
-|---|---|
-| Pull request | `fmt -check` → `validate` → `plan` → comentário com o plan no PR |
-| Push na `main` | `plan` + `apply`, **após aprovação manual** no environment `dev` |
+| Workflow | Evento | O que roda |
+|---|---|---|
+| `ci.yml` | todo PR e push na `main` | `npm ci` → lint → build → testes unitários → e2e (Testcontainers) → `docker build`. O check `verificar` é obrigatório para merge |
+| `terraform.yml` | PR que altera `infra/terraform/**` | `fmt -check` → `validate` → `plan` com a imagem **em uso** → comentário com o plan no PR |
+| `terraform.yml` | push na `main` (exceto só docs) | `imagem`: build + push `nest-api:sha-<commit>` → `deploy`, **após aprovação manual** no environment `dev`: job `nest-migracoes` com a imagem nova → `plan` → `apply` |
+
+O Artifact Registry guarda as 2 imagens mais recentes (política de limpeza em `artifact_registry.tf`), suficiente para rollback para a versão anterior.
 
 - Autenticação via OIDC (Workload Identity Federation) — só o repositório configurado no bootstrap (por ID numérico) consegue credencial.
 - PRs de fork não recebem credencial.
-- Variáveis do repositório: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GCP_BILLING_ACCOUNT`, `API_IMAGE_TAG`.
+- Variáveis do repositório: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GCP_BILLING_ACCOUNT`. A tag da imagem vem do commit (deploy) ou do Cloud Run (plan de PR).
+- Rollback: re-run do workflow `terraform` do commit anterior na `main` (a imagem dele ainda está no registry).
 - **Repo público:** o comentário do plan e os logs são públicos. Valores sensíveis (senhas) aparecem como `(sensitive value)`; IDs de projeto, IPs internos e config ficam visíveis.
 
 ## Mensageria (outbox + Pub/Sub)
@@ -159,7 +163,7 @@ $(terraform output -raw comando_migrar_outbox)
 terraform apply -var-file=envs/dev.tfvars
 ```
 
-Nos deploys seguintes: push da imagem → `comando_migrar_outbox` → apply. Automatizar isso é parte da CI da aplicação (#18).
+Nos deploys seguintes é automático: merge na `main` → imagem → migração → apply (seção 4).
 
 ### DLQ
 

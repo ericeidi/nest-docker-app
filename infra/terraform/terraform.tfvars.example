@@ -3,4 +3,4 @@
 # No CI estes valores vêm das variáveis do environment do GitHub (TF_VAR_*).
 
 conta_faturamento = "XXXXXX-XXXXXX-XXXXXX" # gcloud billing accounts list
-tag_imagem_api    = "v1"
+tag_imagem_api    = "v1" # use a tag em uso no Cloud Run (ver README) para não trocar a imagem num apply local

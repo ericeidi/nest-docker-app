@@ -79,7 +79,7 @@ variable "concorrencia_worker" {
 
 # ---------- Imagens ----------
 variable "tag_imagem_api" {
-  description = "Tag da imagem da API no Artifact Registry (ex.: v1)"
+  description = "Tag da imagem da API no Artifact Registry. No CI: sha-<commit> (deploy) ou a tag em uso (plan de PR)"
   type        = string
 }
 

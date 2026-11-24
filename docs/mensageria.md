@@ -204,6 +204,5 @@ API e worker sobem com `migrate: false` e **falham na inicialização** se o sch
 
 ## Pontos em aberto
 
-- **Deploy manual.** Cada imagem nova exige push → job de migração → apply. Automação no #18.
 - **Sem correlation ID entre API e worker.** Ligar a requisição ao processamento do job exige busca por timestamp. Escopo no #15.
 - **Pool de conexões vs `max_connections`.** Pool configurável por `DB_POOL_MAX` (default 10 por instância) contra `max_connections=30` no Postgres. Ver `infra/terraform/README.md` → "Conexões no Postgres".

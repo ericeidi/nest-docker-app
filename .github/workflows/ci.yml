@@ -1,0 +1,67 @@
+# CI da aplicação: valida todo PR e todo push na main.
+#   verificar → npm ci, lint, build, testes unitários e e2e (Testcontainers usa o Docker do runner)
+#   imagem    → docker build do target runtime (sem push; o push acontece no deploy, em terraform.yml)
+#
+# O check "verificar" é obrigatório para merge na main (branch protection).
+# Actions pinadas por SHA completo (tag é mutável).
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Nenhuma permissão por padrão; cada job declara o mínimo
+permissions: {}
+
+# Push novo no mesmo PR cancela a validação anterior (a da main nunca é cancelada)
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verificar:
+    name: verificar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Instalar Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # Mesma major da imagem (IMAGEM_NODE no Dockerfile)
+          node-version: "24"
+          cache: npm
+
+      - name: Dependências (lockfile estrito)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Testes unitários
+        run: npm test
+
+      - name: Testes e2e
+        run: npm run test:e2e
+
+  imagem:
+    name: imagem
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build da imagem
+        run: docker build --platform linux/amd64 --target runtime -t nest-api:ci .
