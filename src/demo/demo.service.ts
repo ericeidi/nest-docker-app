@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { Outbox } from '@nestjs/outbox';
 import { DataSource, type EntityManager } from 'typeorm';
 import { DisparadorRelay } from '../mensageria/disparador-relay.service.js';
+import { cabecalhosCorrelacao } from '../observabilidade/contexto-correlacao.js';
 import { TOPICO_TAREFA_DEMO_CRIADA, type PayloadTarefaDemoCriada } from './demo.constants.js';
 
 export interface TarefaDemoAgendada {
@@ -27,7 +28,12 @@ export class DemoService {
     const payload: PayloadTarefaDemoCriada = { tarefaId: randomUUID(), criadaEm: new Date().toISOString() };
 
     const mensagemGravada = await this.dataSource.transaction(async (gerenciadorTransacao) =>
-      this.outbox.add(gerenciadorTransacao, { topic: TOPICO_TAREFA_DEMO_CRIADA, payload }),
+      this.outbox.add(gerenciadorTransacao, {
+        topic: TOPICO_TAREFA_DEMO_CRIADA,
+        payload,
+        // Leva o correlationId da requisição até os logs do worker
+        headers: cabecalhosCorrelacao(),
+      }),
     );
 
     // Só depois do commit: a linha precisa estar visível para o relay

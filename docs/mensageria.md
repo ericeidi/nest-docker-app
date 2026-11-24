@@ -84,6 +84,8 @@ const usuarioCriado = await this.dataSource.transaction(async (gerenciadorTransa
   await this.outbox.add(gerenciadorTransacao, {
     topic: TOPICO_USUARIO_CRIADO,
     payload: { usuarioId: usuario.id, criadoEm: new Date().toISOString() } satisfies PayloadUsuarioCriado,
+    // correlationId da requisição: os logs do job no worker saem com o mesmo id
+    headers: cabecalhosCorrelacao(),
   });
   return usuario;
 });
@@ -197,6 +199,13 @@ docker compose logs -f worker                                    # "Tarefa demo 
 | `OUTBOX_RETENCAO_INBOX_DIAS` | `30` | dias que o inbox guarda ids processados (>= dead letters) |
 | `OUTBOX_RETENCAO_DEAD_LETTERS_DIAS` | `14` | dias que uma dead letter do outbox fica disponível para requeue |
 | `DEMO_MENSAGERIA_HABILITADA` | `false` | registra `POST /demo/tarefas` |
+| `LOG_JSON` | `true` | `false` = logs em texto colorido (leitura local) |
+
+### Correlation ID
+
+Toda requisição (API e worker) tem um `correlationId`: o `X-Correlation-ID` recebido (letras, números e `._:-`, até 128 caracteres) ou um UUID gerado, devolvido no header da resposta. Os logs saem em JSON com `correlationId` e `severity` (Cloud Logging).
+
+No caminho assíncrono ele vai junto: `cabecalhosCorrelacao()` grava no header da mensagem do outbox → o transporte publica como atributo `correlationId` no Pub/Sub → o worker roda o job com esse valor. Para achar tudo de uma requisição no Cloud Logging: `jsonPayload.correlationId="<id>"`.
 
 ### Migrations do outbox
 
@@ -205,5 +214,4 @@ API e worker sobem com `migrate: false` e **falham na inicialização** se o sch
 ## Pontos em aberto
 
 - **Deploy manual.** Cada imagem nova exige push → job de migração → apply. Automação no #18.
-- **Sem correlation ID entre API e worker.** Ligar a requisição ao processamento do job exige busca por timestamp. Escopo no #15.
 - **Pool de conexões vs `max_connections`.** Pool configurável por `DB_POOL_MAX` (default 10 por instância) contra `max_connections=30` no Postgres. Ver `infra/terraform/README.md` → "Conexões no Postgres".

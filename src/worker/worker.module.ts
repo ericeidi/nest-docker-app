@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from '../database/database.module.js';
 import { HealthModule } from '../health/health.module.js';
@@ -8,6 +8,7 @@ import { ProcessadorEventos } from '../mensageria/processador-eventos.service.js
 import { TarefaDemoManipulador } from '../demo/tarefa-demo.manipulador.js';
 import { ConsumidorEventosController } from './consumidor-eventos.controller.js';
 import { RelayController } from './relay.controller.js';
+import { middlewareCorrelationId } from '../observabilidade/correlation-id.middleware.js';
 import { ManutencaoOutboxController } from './manutencao-outbox.controller.js';
 
 /**
@@ -30,4 +31,10 @@ import { ManutencaoOutboxController } from './manutencao-outbox.controller.js';
     ProcessadorEventos,
   ],
 })
-export class WorkerModule {}
+export class WorkerModule implements NestModule {
+  // Chamadas do Scheduler e rotas internas também ganham correlationId; o push do Pub/Sub
+  // troca pelo correlationId do evento (ConsumidorEventosController)
+  configure(consumidor: MiddlewareConsumer): void {
+    consumidor.apply(middlewareCorrelationId).forRoutes('*');
+  }
+}
