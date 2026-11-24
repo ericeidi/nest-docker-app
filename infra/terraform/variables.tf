@@ -65,6 +65,12 @@ variable "max_instancias_worker" {
   default     = 1
 }
 
+variable "pool_conexoes_banco" {
+  description = "Máximo de conexões do pool por instância (API e worker). Soma de todas as instâncias precisa caber no max_connections=30 do Postgres"
+  type        = number
+  default     = 10
+}
+
 variable "concorrencia_worker" {
   description = "Mensagens processadas ao mesmo tempo por instância do worker"
   type        = number

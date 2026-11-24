@@ -172,11 +172,11 @@ Replay: corrija a causa, leia a mensagem e republique em `eventos-app` com os me
 
 ### Conexões no Postgres
 
-Cada instância (API ou worker) abre um pool de até 10 conexões (`extra.max` em `src/database/database.module.ts`), e o Postgres aceita `max_connections=30`:
+Cada instância (API ou worker) abre um pool de até `pool_conexoes_banco` conexões (variável `DB_POOL_MAX`, default 10), e o Postgres aceita `max_connections=30`:
 
-`max_instancias_api × 10 + max_instancias_worker × 10 + admin` precisa ficar abaixo de 30.
+`(max_instancias_api + max_instancias_worker) × pool_conexoes_banco + admin` precisa ficar abaixo de 30.
 
-Dev (1 + 1) usa 20. O exemplo de prod (`max_instancias_api = 3`) já chega a 30 só com a API — antes de subir prod, torne o pool configurável por ambiente ou use um pooler (PgBouncer / Cloud SQL).
+Dev (1 + 1, pool 10) usa 20. O exemplo de prod (3 + 1) usa pool 5 → 20. Para escalar além disso sem custo, reduza o pool; aumentar `max_connections` exige mais RAM na VM (sai do e2-micro gratuito).
 
 ## Diagnóstico
 

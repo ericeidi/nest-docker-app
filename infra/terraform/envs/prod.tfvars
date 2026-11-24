@@ -11,6 +11,8 @@ zona       = "us-central1-a"
 tipo_maquina_postgres  = "e2-small"
 tamanho_disco_dados_gb = 50
 max_instancias_api     = 3
+# 3 API + 1 worker = 4 instâncias × 5 = 20 conexões (limite do Postgres: 30)
+pool_conexoes_banco = 5
 
 # API fechada: só contas com roles/run.invoker (ex.: atrás de um gateway)
 api_publica = false

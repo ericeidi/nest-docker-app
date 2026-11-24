@@ -10,6 +10,7 @@ locals {
     { nome = "DB_USER", valor = var.banco_usuario_app },
     { nome = "DB_NAME", valor = var.banco_nome },
     { nome = "DB_PASSWORD_FILE", valor = "/secrets/db_password" },
+    { nome = "DB_POOL_MAX", valor = tostring(var.pool_conexoes_banco) },
     { nome = "PUBSUB_PROJETO_ID", valor = var.projeto_id },
     { nome = "PUBSUB_TOPICO_EVENTOS", valor = google_pubsub_topic.eventos.name },
     # Cloud Run com cpu_idle: sem CPU entre requisições, então o relay não roda em loop
