@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { NonRetryableMessageError } from '@nestjs/outbox';
 import { CLIENTE_PUBSUB } from './../src/mensageria/mensageria.constants.js';
 import { TarefaDemoManipulador } from './../src/demo/tarefa-demo.manipulador.js';
+import { obterCorrelationId } from './../src/observabilidade/contexto-correlacao.js';
 
 // Mesma imagem pinada do docker-compose.yml
 const IMAGEM_POSTGRES =
@@ -95,6 +96,8 @@ describe('Mensageria: outbox → relay → worker (e2e)', () => {
     expect(mensagensPublicadas[0].attributes).toEqual({
       idEvento: resposta.body.idEvento,
       topico: 'demo.tarefa-criada',
+      // Sem header na requisição: o middleware gera um e ele segue com o evento
+      correlationId: resposta.headers['x-correlation-id'],
     });
     expect(JSON.parse(mensagensPublicadas[0].data.toString('utf8')).tarefaId).toBe(resposta.body.tarefaId);
     // Publicada = removida do outbox
@@ -124,6 +127,41 @@ describe('Mensageria: outbox → relay → worker (e2e)', () => {
 
     expect(executarJob).toHaveBeenCalledTimes(2);
     executarJob.mockRestore();
+  });
+
+  it('correlationId da requisição chega ao job no worker', async () => {
+    let correlationIdNoJob: string | undefined;
+    const executarJob = vi
+      .spyOn(worker.get(TarefaDemoManipulador), 'executar')
+      .mockImplementationOnce(async () => {
+        correlationIdNoJob = obterCorrelationId();
+      });
+
+    const resposta = await request(api.getHttpServer())
+      .post('/demo/tarefas')
+      .set('X-Correlation-ID', 'req-e2e-123')
+      .expect(202);
+    expect(resposta.headers['x-correlation-id']).toBe('req-e2e-123');
+    expect(mensagensPublicadas[0].attributes.correlationId).toBe('req-e2e-123');
+
+    // O push do Pub/Sub chega com outro X-Correlation-ID (ou nenhum): vale o do evento
+    await request(worker.getHttpServer())
+      .post('/internal/eventos')
+      .set('X-Correlation-ID', 'push-do-pubsub')
+      .send(montarEnvelopePush(mensagensPublicadas[0], 1))
+      .expect(204);
+
+    expect(correlationIdNoJob).toBe('req-e2e-123');
+    executarJob.mockRestore();
+  });
+
+  it('X-Correlation-ID inválido é trocado por um UUID', async () => {
+    const resposta = await request(api.getHttpServer())
+      .get('/health')
+      .set('X-Correlation-ID', 'abc"}{"level":"error')
+      .expect(200);
+
+    expect(resposta.headers['x-correlation-id']).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('envelope inválido responde 400', async () => {

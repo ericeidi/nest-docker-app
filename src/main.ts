@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module.js';
 import { lerModoApp } from './modo-app.js';
+import { criarLogger } from './observabilidade/logger-json.js';
 import { configurarSegurancaHttp } from './seguranca/seguranca-http.js';
 import { WorkerModule } from './worker/worker.module.js';
 
@@ -12,7 +13,10 @@ const PORTA_PADRAO = 3000;
 async function bootstrap() {
   // Mesma imagem, dois papéis: MODO_APP=api (padrão) ou MODO_APP=worker
   const modoApp = lerModoApp(process.env.MODO_APP);
-  const app = await NestFactory.create(modoApp === 'worker' ? WorkerModule : AppModule);
+  // Logs em JSON com correlationId (LOG_JSON=false volta ao texto para leitura local)
+  const app = await NestFactory.create(modoApp === 'worker' ? WorkerModule : AppModule, {
+    logger: criarLogger(process.env.LOG_JSON),
+  });
 
   // Trata SIGTERM/SIGINT enviados por `docker stop` para encerrar a aplicação de forma limpa
   app.enableShutdownHooks();

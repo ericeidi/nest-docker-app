@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConditionalModule, ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -8,6 +8,7 @@ import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
 import { MensageriaModule } from './mensageria/mensageria.module.js';
 import { DemoProdutorModule } from './demo/demo-produtor.module.js';
+import { middlewareCorrelationId } from './observabilidade/correlation-id.middleware.js';
 
 const JANELA_RATE_LIMIT_PADRAO_MS = 60000;
 const LIMITE_REQUISICOES_PADRAO = 100;
@@ -38,4 +39,8 @@ const LIMITE_REQUISICOES_PADRAO = 100;
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumidor: MiddlewareConsumer): void {
+    consumidor.apply(middlewareCorrelationId).forRoutes('*');
+  }
+}

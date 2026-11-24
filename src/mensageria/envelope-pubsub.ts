@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { ATRIBUTO_ID_EVENTO, ATRIBUTO_TOPICO } from './mensageria.constants.js';
+import { CHAVE_CORRELATION_ID } from '../observabilidade/contexto-correlacao.js';
 
 /** Evento extraído do corpo do push do Pub/Sub. */
 export interface EventoRecebido {
@@ -7,6 +8,8 @@ export interface EventoRecebido {
   topico: string;
   payload: unknown;
   tentativa: number | undefined;
+  /** Correlation ID da requisição que gerou o evento (atributo opcional; validado no uso). */
+  correlationId?: unknown;
 }
 
 /**
@@ -50,6 +53,7 @@ export function lerEnvelopePubSub(corpoRequisicao: unknown): EventoRecebido {
     topico,
     payload,
     tentativa: typeof tentativa === 'number' ? tentativa : undefined,
+    correlationId: atributos[CHAVE_CORRELATION_ID],
   };
 }
 

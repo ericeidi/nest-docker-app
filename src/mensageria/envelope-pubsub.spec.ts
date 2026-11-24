@@ -15,6 +15,14 @@ function criarEnvelope(sobrescrever: Record<string, unknown> = {}) {
 }
 
 describe('lerEnvelopePubSub', () => {
+  it('lê o correlationId dos atributos quando presente', () => {
+    const envelope = criarEnvelope({
+      attributes: { idEvento: 'evento-1', topico: 'demo.tarefa-criada', correlationId: 'req-123' },
+    });
+
+    expect(lerEnvelopePubSub(envelope).correlationId).toBe('req-123');
+  });
+
   it('decodifica o payload e lê id, tópico e tentativa', () => {
     expect(lerEnvelopePubSub(criarEnvelope())).toEqual({
       idEvento: 'evento-1',

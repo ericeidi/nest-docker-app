@@ -1,6 +1,7 @@
 import { OutboxTransport, type OutboxMessage } from '@nestjs/outbox';
 import type { Topic } from '@google-cloud/pubsub';
 import { ATRIBUTO_ID_EVENTO, ATRIBUTO_TOPICO } from './mensageria.constants.js';
+import { CHAVE_CORRELATION_ID } from '../observabilidade/contexto-correlacao.js';
 
 /**
  * Transporte do outbox para o Google Cloud Pub/Sub (o @nestjs/outbox não traz um pronto).
@@ -20,6 +21,10 @@ export class TransportePubSub extends OutboxTransport {
       attributes: {
         [ATRIBUTO_ID_EVENTO]: mensagem.id,
         [ATRIBUTO_TOPICO]: mensagem.topic,
+        // Só quando o produtor gravou (cabecalhosCorrelacao): o Pub/Sub não aceita atributo vazio
+        ...(mensagem.headers[CHAVE_CORRELATION_ID]
+          ? { [CHAVE_CORRELATION_ID]: mensagem.headers[CHAVE_CORRELATION_ID] }
+          : {}),
       },
     });
     await aguardarOuCancelar(publicacao, signal);

@@ -2,12 +2,12 @@ import type { Topic } from '@google-cloud/pubsub';
 import type { OutboxMessage } from '@nestjs/outbox';
 import { TransportePubSub, aguardarOuCancelar } from './transporte-pubsub.js';
 
-function criarMensagemOutbox(): OutboxMessage {
+function criarMensagemOutbox(headers: Record<string, string> = {}): OutboxMessage {
   return {
     id: '0193a1b2-0000-7000-8000-000000000001',
     topic: 'demo.tarefa-criada',
     payload: { tarefaId: 'tarefa-1' },
-    headers: {},
+    headers,
     key: null,
     createdAt: 0,
     availableAt: 0,
@@ -30,6 +30,17 @@ describe('TransportePubSub', () => {
       idEvento: '0193a1b2-0000-7000-8000-000000000001',
       topico: 'demo.tarefa-criada',
     });
+  });
+
+  it('leva o correlationId gravado pelo produtor como atributo', async () => {
+    const publishMessage = vi.fn().mockResolvedValue('id-pubsub-1');
+    const transporte = new TransportePubSub({ publishMessage } as unknown as Topic);
+
+    await transporte.publish(criarMensagemOutbox({ correlationId: 'req-123' }), {
+      signal: new AbortController().signal,
+    });
+
+    expect(publishMessage.mock.calls[0][0].attributes.correlationId).toBe('req-123');
   });
 
   it('propaga a falha do Pub/Sub para o relay reagendar', async () => {
