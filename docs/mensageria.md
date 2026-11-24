@@ -136,13 +136,31 @@ Regras:
 | Falha de quê | **publicar** no Pub/Sub | **processar** no worker (resposta não-2xx) |
 | Tentativas | 10, backoff 1s × 2 até 5 min (`mensageria.module.ts`) | 5 entregas, backoff 10s–600s (`tentativas_entrega_pubsub`) |
 | Onde fica | tabela no Postgres | assinatura pull `eventos-app-dlq-inspecao`, retenção de 7 dias |
-| Inspeção / replay | **sem ferramenta hoje** (ver Pontos em aberto) | `infra/terraform/README.md` → "DLQ" |
+| Inspeção / replay | endpoints internos do worker (abaixo) | `infra/terraform/README.md` → "DLQ" |
+| Retenção | 14 dias (`OUTBOX_RETENCAO_DEAD_LETTERS_DIAS`) | 7 dias |
 
 Envelope inválido no push (sem `idEvento`, sem `topico`, `data` que não é JSON) → 400 → reentregue e, depois do limite, vai para a DLQ do Pub/Sub, onde fica visível.
 
 **Replay da DLQ do Pub/Sub:** corrija a causa e republique em `eventos-app` com os **mesmos atributos** (`idEvento`, `topico`). O worker deduplica pelo `idEvento`, então o replay de uma mensagem que já foi processada é inofensivo. Os comandos estão no README da infra.
 
 > No emulador local a DLQ funciona, mas o emulador não envia `deliveryAttempt`: `contexto.tentativa` chega `undefined`.
+
+### Dead letters do outbox
+
+Rotas no worker (privado no Cloud Run: só quem tem `roles/run.invoker`):
+
+| Rota | O que faz |
+|---|---|
+| `GET /internal/outbox/dead-letters?limit=&offset=` | lista as mais recentes (limit 1–100, padrão 50): id, tópico, motivo, tentativas, último erro, data. **Sem payload**, que pode conter dados pessoais |
+| `POST /internal/outbox/dead-letters/:id/requeue` | devolve ao outbox com novas tentativas e o **mesmo id** (o inbox continua deduplicando); 204, ou 404 se não existe |
+
+No GCP: `$(terraform output -raw comando_listar_dead_letters_outbox)` e `comando_reenfileirar_dead_letter_outbox` (troque `<ID>`). O relay publica na próxima rodada (até 1 min).
+
+### Retenção
+
+O pacote não limpa `nest_outbox.inbox` nem `nest_outbox.dead_letters`. `POST /internal/outbox/manutencao` no worker apaga inbox com mais de `OUTBOX_RETENCAO_INBOX_DIAS` (30) e dead letters com mais de `OUTBOX_RETENCAO_DEAD_LETTERS_DIAS` (14). No GCP, o Cloud Scheduler `manutencao-outbox` chama uma vez por dia (06:00 UTC).
+
+O inbox precisa durar **pelo menos** tanto quanto as dead letters: uma dead letter reenfileirada mantém o id, e se o inbox já tiver esquecido esse id o job roda de novo. A configuração recusa subir com inbox < dead letters.
 
 ## Rodando local (docker compose)
 
@@ -176,6 +194,8 @@ docker compose logs -f worker                                    # "Tarefa demo 
 | `PUBSUB_TOPICO_EVENTOS` | `eventos-app` | tópico onde o relay publica |
 | `PUBSUB_EMULATOR_HOST` | — | definida = usa o emulador |
 | `OUTBOX_MIGRAR_NA_INICIALIZACAO` | `false` | `true` só em testes/desenvolvimento; senão, rode o job de migração |
+| `OUTBOX_RETENCAO_INBOX_DIAS` | `30` | dias que o inbox guarda ids processados (>= dead letters) |
+| `OUTBOX_RETENCAO_DEAD_LETTERS_DIAS` | `14` | dias que uma dead letter do outbox fica disponível para requeue |
 | `DEMO_MENSAGERIA_HABILITADA` | `false` | registra `POST /demo/tarefas` |
 
 ### Migrations do outbox
@@ -184,6 +204,6 @@ API e worker sobem com `migrate: false` e **falham na inicialização** se o sch
 
 ## Pontos em aberto
 
-- **DLQ do outbox sem ferramenta.** Mensagens em `nest_outbox.dead_letters` não têm endpoint nem script de inspeção/requeue. O pacote oferece `OutboxDeadLetters` (`list`, `get`, `requeue`, `purge`, que mantém o mesmo id, então o inbox continua deduplicando), mas nada no projeto chama. Precisa de um endpoint interno no worker ou de um script.
-- **Sem retenção.** O pacote não limpa `nest_outbox.inbox` nem `nest_outbox.dead_letters`: as tabelas crescem sem limite. A recomendação do pacote é `OutboxInbox.prune()` e `OutboxDeadLetters.purge()` agendados (ex.: inbox 30 dias, dead letters 14 dias). O inbox precisa durar mais do que uma mensagem pode levar para voltar (incluindo o tempo parada numa DLQ antes do replay).
+- **Deploy manual.** Cada imagem nova exige push → job de migração → apply. Automação no #18.
+- **Sem correlation ID entre API e worker.** Ligar a requisição ao processamento do job exige busca por timestamp. Escopo no #15.
 - **Pool de conexões vs `max_connections`.** Pool configurável por `DB_POOL_MAX` (default 10 por instância) contra `max_connections=30` no Postgres. Ver `infra/terraform/README.md` → "Conexões no Postgres".

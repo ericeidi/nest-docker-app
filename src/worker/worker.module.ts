@@ -8,6 +8,7 @@ import { ProcessadorEventos } from '../mensageria/processador-eventos.service.js
 import { TarefaDemoManipulador } from '../demo/tarefa-demo.manipulador.js';
 import { ConsumidorEventosController } from './consumidor-eventos.controller.js';
 import { RelayController } from './relay.controller.js';
+import { ManutencaoOutboxController } from './manutencao-outbox.controller.js';
 
 /**
  * Módulo raiz do modo worker (MODO_APP=worker): recebe o push do Pub/Sub e roda os jobs.
@@ -18,7 +19,7 @@ import { RelayController } from './relay.controller.js';
  */
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), DatabaseModule, HealthModule, MensageriaModule],
-  controllers: [ConsumidorEventosController, RelayController],
+  controllers: [ConsumidorEventosController, RelayController, ManutencaoOutboxController],
   providers: [
     TarefaDemoManipulador,
     {

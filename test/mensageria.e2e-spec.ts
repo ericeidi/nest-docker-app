@@ -4,6 +4,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { DataSource } from 'typeorm';
+import { NonRetryableMessageError } from '@nestjs/outbox';
 import { CLIENTE_PUBSUB } from './../src/mensageria/mensageria.constants.js';
 import { TarefaDemoManipulador } from './../src/demo/tarefa-demo.manipulador.js';
 
@@ -140,6 +141,38 @@ describe('Mensageria: outbox → relay → worker (e2e)', () => {
 
     expect(resposta.body.publicadas).toBe(1);
     expect(await contarMensagensPendentes()).toBe(0);
+  });
+
+  it('publicação rejeitada vai para as dead letters do outbox; o requeue publica de novo com o mesmo id', async () => {
+    publicarNoPubSub.mockRejectedValueOnce(new NonRetryableMessageError('payload recusado'));
+
+    const resposta = await request(api.getHttpServer()).post('/demo/tarefas').expect(202);
+
+    const listagem = await request(worker.getHttpServer()).get('/internal/outbox/dead-letters').expect(200);
+    const deadLetter = listagem.body.find((item: { id: string }) => item.id === resposta.body.idEvento);
+    expect(deadLetter).toMatchObject({ topico: 'demo.tarefa-criada', motivo: 'rejected' });
+    expect(deadLetter).not.toHaveProperty('payload');
+
+    await request(worker.getHttpServer()).post(`/internal/outbox/dead-letters/${deadLetter.id}/requeue`).expect(204);
+    await request(worker.getHttpServer()).post('/internal/outbox/relay').expect(200);
+
+    expect(mensagensPublicadas).toHaveLength(1);
+    expect(mensagensPublicadas[0].attributes.idEvento).toBe(resposta.body.idEvento);
+    await request(worker.getHttpServer())
+      .post(`/internal/outbox/dead-letters/${deadLetter.id}/requeue`)
+      .expect(404);
+  });
+
+  it('dead-letters valida paginação e formato do id', async () => {
+    await request(worker.getHttpServer()).get('/internal/outbox/dead-letters?limit=101').expect(400);
+    await request(worker.getHttpServer()).post('/internal/outbox/dead-letters/nao-e-uuid/requeue').expect(400);
+  });
+
+  it('manutenção roda a retenção no banco real', async () => {
+    const resposta = await request(worker.getHttpServer()).post('/internal/outbox/manutencao').expect(200);
+
+    // Tudo foi criado agora: nada passa da retenção
+    expect(resposta.body).toEqual({ inboxRemovidas: 0, deadLettersRemovidas: 0 });
   });
 
   afterAll(async () => {

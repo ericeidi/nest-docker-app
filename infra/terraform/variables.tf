@@ -174,3 +174,9 @@ variable "agenda_relay_outbox" {
   type        = string
   default     = "* * * * *"
 }
+
+variable "agenda_manutencao_outbox" {
+  description = "Cron do Cloud Scheduler que aplica a retenção do outbox no worker (UTC)"
+  type        = string
+  default     = "0 6 * * *" # 03h em São Paulo, fora do horário de uso
+}

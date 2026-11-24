@@ -4,6 +4,7 @@ import { PostgresOutboxStore, fromTypeOrm } from '@nestjs/outbox/postgres';
 import type { PubSub } from '@google-cloud/pubsub';
 import { DataSource } from 'typeorm';
 import { DisparadorRelay } from './disparador-relay.service.js';
+import { ManutencaoOutbox } from './manutencao-outbox.service.js';
 import type { ConfiguracaoMensageria } from './mensageria.config.js';
 import { CLIENTE_PUBSUB, TRANSPORTE_PUBSUB } from './mensageria.constants.js';
 import { MensageriaClientesModule } from './mensageria-clientes.module.js';
@@ -54,7 +55,8 @@ const TENTATIVAS_PUBLICACAO = 10;
         ),
     },
     DisparadorRelay,
+    ManutencaoOutbox,
   ],
-  exports: [DisparadorRelay],
+  exports: [DisparadorRelay, ManutencaoOutbox],
 })
 export class MensageriaModule {}

@@ -12,6 +12,8 @@ describe('lerConfiguracaoMensageria', () => {
       topicoEventos: 'eventos-app',
       modoRelay: 'continuo',
       migrarNaInicializacao: false,
+      retencaoInboxDias: 30,
+      retencaoDeadLettersDias: 14,
     });
   });
 
@@ -22,6 +24,8 @@ describe('lerConfiguracaoMensageria', () => {
         PUBSUB_TOPICO_EVENTOS: 'outro-topico',
         OUTBOX_RELAY_MODO: 'sob-demanda',
         OUTBOX_MIGRAR_NA_INICIALIZACAO: 'true',
+        OUTBOX_RETENCAO_INBOX_DIAS: '60',
+        OUTBOX_RETENCAO_DEAD_LETTERS_DIAS: '7',
       }),
     );
 
@@ -30,6 +34,8 @@ describe('lerConfiguracaoMensageria', () => {
       topicoEventos: 'outro-topico',
       modoRelay: 'sob-demanda',
       migrarNaInicializacao: true,
+      retencaoInboxDias: 60,
+      retencaoDeadLettersDias: 7,
     });
   });
 
@@ -37,5 +43,22 @@ describe('lerConfiguracaoMensageria', () => {
     expect(() => lerConfiguracaoMensageria(criarConfigService({ OUTBOX_RELAY_MODO: 'sempre' }))).toThrow(
       'OUTBOX_RELAY_MODO inválido',
     );
+  });
+
+  it('rejeita retenção que não é inteiro positivo', () => {
+    expect(() => lerConfiguracaoMensageria(criarConfigService({ OUTBOX_RETENCAO_INBOX_DIAS: '0' }))).toThrow(
+      'OUTBOX_RETENCAO_INBOX_DIAS inválido',
+    );
+    expect(() => lerConfiguracaoMensageria(criarConfigService({ OUTBOX_RETENCAO_DEAD_LETTERS_DIAS: 'abc' }))).toThrow(
+      'OUTBOX_RETENCAO_DEAD_LETTERS_DIAS inválido',
+    );
+  });
+
+  it('rejeita inbox mais curto que as dead letters (requeue reprocessaria o job)', () => {
+    expect(() =>
+      lerConfiguracaoMensageria(
+        criarConfigService({ OUTBOX_RETENCAO_INBOX_DIAS: '7', OUTBOX_RETENCAO_DEAD_LETTERS_DIAS: '14' }),
+      ),
+    ).toThrow('precisa ser >=');
   });
 });
