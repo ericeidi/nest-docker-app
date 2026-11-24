@@ -50,3 +50,57 @@ resource "google_project_iam_member" "postgres_escreve_logs" {
   role    = "roles/logging.logWriter"
   member  = "serviceAccount:${google_service_account.postgres.email}"
 }
+
+# ---------- Worker (Cloud Run) ----------
+resource "google_service_account" "worker" {
+  account_id   = "sa-nest-worker"
+  display_name = "Cloud Run — nest-worker"
+
+  depends_on = [google_project_service.apis]
+}
+
+# Mesma senha da role da aplicação (o worker usa o mesmo banco)
+resource "google_secret_manager_secret_iam_member" "worker_le_db_password" {
+  secret_id = google_secret_manager_secret.db_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.worker.email}"
+}
+
+# ---------- Job de migração (Cloud Run Job) ----------
+# SA própria: só lê a senha do banco (não publica no Pub/Sub nem invoca serviços)
+resource "google_service_account" "migracoes" {
+  account_id   = "sa-nest-migracoes"
+  display_name = "Cloud Run Job — nest-migracoes"
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_iam_member" "migracoes_le_db_password" {
+  secret_id = google_secret_manager_secret.db_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.migracoes.email}"
+}
+
+# ---------- Push do Pub/Sub → worker ----------
+# Identidade do token OIDC que o Pub/Sub envia no push. Só tem roles/run.invoker no worker.
+resource "google_service_account" "pubsub_push" {
+  account_id   = "sa-pubsub-push"
+  display_name = "Pub/Sub push — invoca o nest-worker"
+
+  depends_on = [google_project_service.apis]
+}
+
+# O agente do Pub/Sub gera o token OIDC em nome desta SA (só nesta SA, não no projeto)
+resource "google_service_account_iam_member" "agente_pubsub_gera_token_push" {
+  service_account_id = google_service_account.pubsub_push.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = local.agente_servico_pubsub
+}
+
+# ---------- Cloud Scheduler → worker ----------
+resource "google_service_account" "scheduler" {
+  account_id   = "sa-scheduler-relay"
+  display_name = "Cloud Scheduler — relay do outbox no nest-worker"
+
+  depends_on = [google_project_service.apis]
+}

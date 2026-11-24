@@ -8,6 +8,8 @@ locals {
     "billingbudgets.googleapis.com",
     "iap.googleapis.com",
     "iam.googleapis.com",
+    "pubsub.googleapis.com",         # mensageria (outbox → worker)
+    "cloudscheduler.googleapis.com", # rede de segurança do relay do outbox
   ]
 }
 

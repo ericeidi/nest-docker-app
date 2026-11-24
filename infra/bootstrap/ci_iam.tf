@@ -17,7 +17,7 @@ resource "google_service_account_iam_member" "github_usa_sa" {
 
 locals {
   papeis_projeto_ci = [
-    "roles/run.admin",                       # Cloud Run
+    "roles/run.admin",                       # Cloud Run (serviços e jobs)
     "roles/compute.networkAdmin",            # VPC, subnet, IP interno
     "roles/compute.securityAdmin",           # firewall
     "roles/compute.instanceAdmin.v1",        # VM e disco
@@ -27,6 +27,8 @@ locals {
     "roles/iam.serviceAccountUser",          # anexar SAs na VM e no Cloud Run
     "roles/resourcemanager.projectIamAdmin", # google_project_iam_member (logWriter)
     "roles/serviceusage.serviceUsageAdmin",  # google_project_service
+    "roles/pubsub.admin",                    # tópicos, assinaturas + IAM (mensageria)
+    "roles/cloudscheduler.admin",            # job do relay do outbox
   ]
 }
 

@@ -3,20 +3,24 @@
 Sobe a nest-docker-app no GCP mirando **~US$ 0/mês** no ambiente dev.
 
 ```
-Internet ─HTTPS─▶ Cloud Run (nest-api, min=0/max=1)
-                      │ Direct VPC egress (só IPs privados)
-                      ▼
-              VPC nest-vpc · 10.10.0.0/24
+Internet ─HTTPS─▶ Cloud Run (nest-api, min=0/max=1) ──publica──▶ Pub/Sub: eventos-app
+                      │ Direct VPC egress                          │ push + OIDC
+                      │                                            ▼
+                      │                         Cloud Run (nest-worker, privado, min=0/max=1)
+                      │                                            │        ▲
+                      ▼                                            │        │ a cada 1 min (OIDC)
+              VPC nest-vpc · 10.10.0.0/24 ◀────────────────────────┘   Cloud Scheduler: relay-outbox
                       │
               VM e2-micro nest-postgres (sem IP público, COS)
                 └─ container postgres:18.7-alpine · dados em disco pd-standard 20 GB
+                   └─ schema nest_outbox (outbox, dead letters, inbox) — migrado pelo job nest-migracoes
 
+Pub/Sub:           eventos-app → assinatura push eventos-app-worker → (5 falhas) → eventos-app-dlq
 Artifact Registry: app (imagem da API, mantém 2) · dockerhub-proxy (cache da imagem do Postgres)
 Secret Manager:    db_password · postgres_admin_password (gerados pelo Terraform)
 Orçamento:         alerta por e-mail (50% / 90% / 100%)
 State:             gs://<projeto>-tfstate/nest-docker-app/<ambiente>
 ```
-
 ## Estrutura
 
 ```
@@ -46,6 +50,9 @@ infra/
 | Artifact Registry | 0,5 GB | política de limpeza mantém 2 versões |
 | Cloud Storage (state) | 5 GB Standard em região US | poucos KB, 5 versões antigas |
 | Snapshots/backups | — (cobrado) | **não** são criados — dados descartáveis |
+| Pub/Sub | 10 GiB de mensagens/mês | payloads pequenos (só ids) |
+| Cloud Scheduler | 3 jobs por conta de faturamento | 1 job (`relay-outbox`) |
+| Cloud Run Jobs | mesma cota de vCPU-s do Cloud Run | `nest-migracoes` roda segundos por deploy |
 
 > Valores de preço/free tier mudam. Confira em https://cloud.google.com/free e no relatório de Billing.
 
@@ -123,6 +130,54 @@ terraform plan -var-file=envs/prod.tfvars
 - Variáveis do repositório: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GCP_BILLING_ACCOUNT`, `API_IMAGE_TAG`.
 - **Repo público:** o comentário do plan e os logs são públicos. Valores sensíveis (senhas) aparecem como `(sensitive value)`; IDs de projeto, IPs internos e config ficam visíveis.
 
+## Mensageria (outbox + Pub/Sub)
+
+A API grava o evento no outbox (mesma transação dos dados) e publica no Pub/Sub logo após o commit, ainda dentro da requisição (`OUTBOX_RELAY_MODO=sob-demanda`: com `cpu_idle` não há CPU para um loop em background). O Pub/Sub entrega por push ao `nest-worker`, que é **privado**: só `sa-pubsub-push` e `sa-scheduler-relay` têm `roles/run.invoker`. O Cloud Scheduler chama `/internal/outbox/relay` a cada minuto para publicar o que ficou pendente.
+
+### Primeira subida da mensageria (ordem importa)
+
+A API e o worker sobem com `migrate: false`: sem o schema `nest_outbox` o startup falha. E a imagem `v1` ainda não tem o worker.
+
+```bash
+# 0. Uma vez: o CI precisa dos papéis novos (pubsub.admin, cloudscheduler.admin) — state local
+cd infra/bootstrap && terraform apply
+
+# 1. Imagem nova (com a mensageria)
+IMAGEM=us-central1-docker.pkg.dev/<projeto_id>/app/nest-api:v2
+docker build --platform linux/amd64 --target runtime -t "$IMAGEM" ../.. && docker push "$IMAGEM"
+#    e atualize tag_imagem_api (local) / API_IMAGE_TAG (GitHub) para v2
+
+# 2. Permissão da role da aplicação para criar o schema. O volume do Postgres já existe e o
+#    script de init só roda sozinho em volume novo (e a cópia na VM só é atualizada no próximo boot),
+#    então aplique o GRANT direto, pelo socket local do container:
+$(terraform output -raw comando_ssh_postgres)
+sudo docker exec postgres psql -U postgres_admin -d nest_app_db -c 'GRANT CREATE ON DATABASE nest_app_db TO nest_app;'
+
+# 3. Job de migração primeiro, depois o resto
+terraform apply -var-file=envs/dev.tfvars -target=google_cloud_run_v2_job.migracoes
+$(terraform output -raw comando_migrar_outbox)
+terraform apply -var-file=envs/dev.tfvars
+```
+
+Nos deploys seguintes: push da imagem → `comando_migrar_outbox` → apply. Automatizar isso é parte da CI da aplicação (#18).
+
+### DLQ
+
+```bash
+$(terraform output -raw comando_ler_dlq)          # lê sem confirmar (a mensagem continua lá)
+gcloud pubsub subscriptions pull eventos-app-dlq-inspecao --auto-ack --limit 10   # lê e descarta
+```
+
+Replay: corrija a causa, leia a mensagem e republique em `eventos-app` com os mesmos atributos (`idEvento`, `topico`) — o worker deduplica pelo `idEvento`.
+
+### Conexões no Postgres
+
+Cada instância (API ou worker) abre um pool de até `pool_conexoes_banco` conexões (variável `DB_POOL_MAX`, default 10), e o Postgres aceita `max_connections=30`:
+
+`(max_instancias_api + max_instancias_worker) × pool_conexoes_banco + admin` precisa ficar abaixo de 30.
+
+Dev (1 + 1, pool 10) usa 20. O exemplo de prod (3 + 1) usa pool 5 → 20. Para escalar além disso sem custo, reduza o pool; aumentar `max_connections` exige mais RAM na VM (sai do e2-micro gratuito).
+
 ## Diagnóstico
 
 ```bash
@@ -134,8 +189,9 @@ sudo systemctl status postgres
 sudo journalctl -u postgres -n 100
 sudo docker logs postgres
 
-# Logs da API
+# Logs da API e do worker
 gcloud run services logs read nest-api --region us-central1
+gcloud run services logs read nest-worker --region us-central1
 ```
 
 ## Derrubar (volta a custo zero)

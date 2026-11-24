@@ -6,6 +6,8 @@ import { lerSegredo } from './ler-segredo.js';
 const PORTA_POSTGRES_PADRAO = 5432;
 const TENTATIVAS_CONEXAO = 5;
 const INTERVALO_ENTRE_TENTATIVAS_MS = 3000;
+// Conexões por instância; somadas entre API e worker precisam caber no max_connections do Postgres
+const MAX_CONEXOES_POOL_PADRAO = 10;
 
 /**
  * Conexão com o PostgreSQL via TypeORM.
@@ -32,7 +34,7 @@ const INTERVALO_ENTRE_TENTATIVAS_MS = 3000;
         retryDelay: INTERVALO_ENTRE_TENTATIVAS_MS,
         // Opções repassadas ao pool do driver pg
         extra: {
-          max: 10,
+          max: Number(configService.get<string>('DB_POOL_MAX', String(MAX_CONEXOES_POOL_PADRAO))),
           connectionTimeoutMillis: 5000,
           idleTimeoutMillis: 10000,
         },
